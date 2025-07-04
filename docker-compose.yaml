@@ -1,0 +1,24 @@
+services:
+
+  kb-postgres:
+    image: postgres:17.5
+    container_name: kb_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: kb-postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  kb-adminer:
+    image: adminer
+    container_name: kb_adminer
+    restart: always
+    ports:
+      - 8080:8080 
+
+volumes:
+  postgres_data:
