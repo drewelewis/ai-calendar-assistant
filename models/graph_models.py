@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
-class Graph():
+class GraphModels():
 
     class UserModel(BaseModel):
         ObjectId: int = Field(..., description="ID of the user")

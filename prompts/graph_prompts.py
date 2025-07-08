@@ -1,10 +1,13 @@
+from datetime import datetime
+
+
 class M365Prompts:
     """
     A class to store and manage all prompts used in the AI knowledge base.
     """
     def __init__(self):
         # Example prompts, add or modify as needed
-        
+        self.current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.master_prompt_str = (
             """ 
                 You are a meeting scheduling assistant.
@@ -40,7 +43,8 @@ class M365Prompts:
         )
 
     def master_prompt(self):
-        return self.master_prompt_str
+        prompt=self.current_datetime + "\n\n" + self.master_prompt_str
+        return prompt
 
     def get_search_prompt(self):
         return self.search_prompt

@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import traceback
 import asyncio
@@ -29,12 +30,13 @@ scope = ["https://graph.microsoft.com/.default"]
 graph_client = GraphServiceClient(credential, scope)
 
 class GraphOperations:
-    def __init__(self, response_fields):
+    def __init__(self, user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"], calendar_response_fields=["subject", "start", "end", "location", "attendees"]):
         """
         Initialize the GraphOperations class.
         This class provides methods to interact with Microsoft Graph API.
         """
-        self.response_fields = response_fields 
+        self.user_response_fields = user_response_fields
+        self.calendar_response_fields = calendar_response_fields
 
     def _get_client(self) -> GraphServiceClient:
         credential = ClientSecretCredential(tenant_id, client_id, client_secret)
@@ -44,6 +46,10 @@ class GraphOperations:
         graph_client = GraphServiceClient(credential, scope)
         return graph_client
     
+    # Get Current Date and Time
+    def get_current_datetime(self) -> str:
+        return datetime.now().isoformat()
+
     # Get a user by user ID
     async def get_user_by_user_id(self, user_id: str) -> User | None:
         try:
@@ -51,9 +57,9 @@ class GraphOperations:
             # Configure the request with proper query parameters
 
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
-                        
+                    
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.response_fields
+            query_params.select = self.user_response_fields
             query_params.filter = f"id eq '{user_id}'"
             # Limit results for testing
             query_params.top = 1
@@ -84,7 +90,7 @@ class GraphOperations:
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
                         
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.response_fields
+            query_params.select = self.user_response_fields
             query_params.filter = f"id eq '{user_id}'"
             # Limit results for testing
             query_params.top = 1
@@ -155,7 +161,7 @@ class GraphOperations:
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
                         
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.response_fields
+            query_params.select = self.user_response_fields
             # Limit results for testing
             query_params.top = max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
@@ -186,7 +192,7 @@ class GraphOperations:
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
                         
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.response_fields
+            query_params.select = self.user_response_fields
             # Limit results for testing
             query_params.top = max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
@@ -226,7 +232,7 @@ class GraphOperations:
                 print(f"Applied filter: {query_params.filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.response_fields
+            query_params.select = self.user_response_fields
             # Limit results for testing
             query_params.top = max_results
             
@@ -261,7 +267,7 @@ class GraphOperations:
                 print(f"Applied filter: {filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.response_fields
+            query_params.select = self.user_response_fields
             # Limit results for testing
             query_params.top = max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
@@ -282,14 +288,113 @@ class GraphOperations:
             return []
 
     # Calendar Operations
-    
-    
+    # Get calendar events for a user by user ID with optional date range
+    async def get_calendar_events_by_user_id(self, user_id: str, start_date: str = None, end_date: str = None) -> DirectoryObject  | None:
+        try:
+            graph_client = self._get_client()
+            # Configure the request with proper query parameters
+            from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+            query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
+                        
+            # Select specific fields to reduce response size and ensure we get what we need
+            query_params.select = self.calendar_response_fields
+            query_params.filter = f"id eq '{user_id}'"
+            # Limit results for testing
+            query_params.top = 1
+            request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params
+            )
+            user_response = await graph_client.users.get(request_configuration=request_configuration)
 
+            if hasattr(user_response, 'value') and user_response.value:
+                # response.value is a list, get the first (and should be only) user
+                user = user_response.value[0]
+
+                # Fetch event details if available
+                try:
+                    from msgraph.generated.users.item.calendar.events.events_request_builder import EventsRequestBuilder
+                    
+                    # Configure query parameters to order by start date
+                    events_query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters()
+                    events_query_params.orderby = ["start/dateTime"]
+                    events_query_params.select = self.calendar_response_fields
+                    
+                    # Add date range filter if provided
+                    filters = []
+                    if start_date:
+                        filters.append(f"start/dateTime ge '{start_date}'")
+                    if end_date:
+                        filters.append(f"end/dateTime le '{end_date}'")
+                    
+                    if filters:
+                        events_query_params.filter = " and ".join(filters)
+                    
+                    events_request_config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
+                        query_parameters=events_query_params
+                    )
+                    
+                    event_response = await graph_client.users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
+                    if hasattr(event_response, 'value') and event_response.value:
+                        events = event_response.value
+                    else:
+                        events = []
+                except Exception as events_error:
+                    print(f"Could not fetch events for user {user_id}: {events_error}")
+                    events = None
+
+                return events
+            else:
+                return None
+            
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.users: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return []
+    
+    # Create calendar event for a list of attendees and optional attendees
+    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, attendees: List[str] = None, optional_attendees: List[str] = None) -> Event:
+        try:
+            graph_client = self._get_client()
+            
+            # Create the event object
+            event = Event(
+                subject=subject,
+                start=DateTimeTimeZone(date_time=start, time_zone="UTC"),
+                end=DateTimeTimeZone(date_time=end, time_zone="UTC"),
+                location=Location(display_name=location) if location else None,
+                attendees=[]
+            )
+            
+            # Add required attendees
+            if attendees:
+                for attendee in attendees:
+                    email_address = EmailAddress(address=attendee)
+                    event.attendees.append(Attendee(email_address=email_address, type="required"))
+            
+            # Add optional attendees
+            if optional_attendees:
+                for attendee in optional_attendees:
+                    email_address = EmailAddress(address=attendee)
+                    event.attendees.append(Attendee(email_address=email_address, type="optional"))
+            
+            # Create the event in the user's calendar
+            created_event = await graph_client.users.by_user_id(user_id).calendar.events.post(event)
+            return created_event
+            
+        except Exception as e:
+            print(f"An error occurred while creating calendar event: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return None
       
 # # Example usage:
 
 if __name__ == "__main__":
-    ops = GraphOperations(response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"])
+    ops = GraphOperations(
+        user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"],
+        calendar_response_fields=["id", "subject", "start", "end", "location", "attendees"]
+    )
     # print(60 * "=")
     # print("Get User by User ID")
     # print(60 * "=")
@@ -339,37 +444,60 @@ if __name__ == "__main__":
     # print(f"Department: {user.department}")
     # print(f"Manager: {user.manager}")
 
-    # Get Prita's Direct Reports
-    print(60 * "=")
-    print("Getting Prita's (IT Manager) direct reports...")
-    print(60 * "=")
-    direct_reports = asyncio.run(ops.get_direct_reports_by_user_id("5d6bc6b4-4294-4994-8206-8be6ee865407"))
-    for user in direct_reports:
-        print(60 * "=")
-        print(f"ID: {user.id}")
-        print(f"Given Name: {user.given_name}")
-        print(f"Surname: {user.surname}")
-        print(f"Display Name: {user.display_name}")
-        print(f"User Principal Name: {user.user_principal_name}")
-        print(f"Mail: {user.mail}")
-        print(f"Job Title: {user.job_title}")
-        print(f"Department: {user.department}")
-        print(f"Manager: {user.manager}")
+    # # Get Prita's Direct Reports
+    # print(60 * "=")
+    # print("Getting Prita's (IT Manager) direct reports...")
+    # print(60 * "=")
+    # direct_reports = asyncio.run(ops.get_direct_reports_by_user_id("5d6bc6b4-4294-4994-8206-8be6ee865407"))
+    # for user in direct_reports:
+    #     print(60 * "=")
+    #     print(f"ID: {user.id}")
+    #     print(f"Given Name: {user.given_name}")
+    #     print(f"Surname: {user.surname}")
+    #     print(f"Display Name: {user.display_name}")
+    #     print(f"User Principal Name: {user.user_principal_name}")
+    #     print(f"Mail: {user.mail}")
+    #     print(f"Job Title: {user.job_title}")
+    #     print(f"Department: {user.department}")
+    #     print(f"Manager: {user.manager}")
 
-    # Get all departments
-    print(60 * "=")
-    print("Getting all departments in the Microsoft 365 Tenant Entra Directory...")
-    print(60 * "=")
-    departments = asyncio.run(ops.get_all_departments(100))
-    print(f"Found {len(departments)} departments:")
-    for dept in departments:
-        print(f"  - {dept}")
+    # # Get all departments
+    # print(60 * "=")
+    # print("Getting all departments in the Microsoft 365 Tenant Entra Directory...")
+    # print(60 * "=")
+    # departments = asyncio.run(ops.get_all_departments(100))
+    # print(f"Found {len(departments)} departments:")
+    # for dept in departments:
+    #     print(f"  - {dept}")
 
-    # Get all users by department
-    print(60 * "=")
-    print("Getting all users in the Information Technology department...")
-    print(60 * "=")
-    it_users = asyncio.run(ops.get_users_by_department("Information Technology", 100))
-    print(f"Found {len(it_users)} users in the Information Technology department:")
-    for user in it_users:
-       print(f"  - {user.display_name} ({user.user_principal_name})")
+    # # Get all users by department
+    # print(60 * "=")
+    # print("Getting all users in the Information Technology department...")
+    # print(60 * "=")
+    # it_users = asyncio.run(ops.get_users_by_department("Information Technology", 100))
+    # print(f"Found {len(it_users)} users in the Information Technology department:")
+    # for user in it_users:
+    #    print(f"  - {user.display_name} ({user.user_principal_name})")
+
+    # Get user events by user ID
+    # print(60 * "=")
+    # print("Getting events for user by user ID...")
+    # print(60 * "=")
+    # user_id = "69149650-b87e-44cf-9413-db5c1a5b6d3f"  # Example user ID
+    
+    # # Example with date range (ISO 8601 format)
+    # start_date = "2025-07-01T00:00:00Z"  # Start of July 2025
+    # end_date = "2025-07-31T23:59:59Z"    # End of July 2025
+    
+    # events = asyncio.run(ops.get_calendar_events_by_user_id(user_id, start_date, end_date))
+    # if events:
+    #     for event in events:
+    #         print(60 * "=")
+    #         print(f"Subject: {event.subject}")
+    #         print(f"Start: {event.start}")
+    #         print(f"End: {event.end}")
+    #         print(f"Location: {event.location}")
+    #         print(f"Attendees: {event.attendees}")
+    # else:
+    #     print("No events found in the specified date range.")
+

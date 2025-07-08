@@ -1,24 +1,16 @@
 services:
-
-  kb-postgres:
-    image: postgres:17.5
-    container_name: kb_postgres
+  apiwrapper:
+    image: "drewl/simpleopenaiapiwrapper:latest"
     ports:
-      - "5432:5432"
+    - "80:80"
+    - "443:443"
+    - "8989:8989"
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: kb-postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - OPENAI_ENDPOINT=${OPENAI_ENDPOINT}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_VERSION=${OPENAI_API_VERSION}
+      - OPENAI_MODEL_DEPLOYMENT_NAME=${OPENAI_MODEL_DEPLOYMENT_NAME}
+      - OPENAI_PROMPT=${OPENAI_PROMPT}
 
-  kb-adminer:
-    image: adminer
-    container_name: kb_adminer
-    restart: always
-    ports:
-      - 8080:8080 
-
-volumes:
-  postgres_data:
