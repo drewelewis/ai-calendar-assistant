@@ -18,9 +18,9 @@ from msgraph.generated.models.attendee import Attendee
 from msgraph.generated.models.email_address import EmailAddress
 
 # Replace with your values
-tenant_id = os.getenv("TENANT_ID")
-client_id = os.getenv("CLIENT_ID")
-client_secret = os.getenv("CLIENT_SECRET")
+tenant_id = os.getenv("ENTRA_GRAPH_APPLICATION_TENANT_ID")
+client_id = os.getenv("ENTRA_GRAPH_APPLICATION_CLIENT_ID")
+client_secret = os.getenv("ENTRA_GRAPH_APPLICATION_CLIENT_SECRET")
 
 credential = ClientSecretCredential(tenant_id, client_id, client_secret)
 

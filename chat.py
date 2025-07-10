@@ -42,11 +42,13 @@ system_message="Today's date and time: " + current_datetime + "\n\n"
 system_message= system_message + prompts.master_prompt()
 
 llm  = AzureChatOpenAI(
-    azure_endpoint=os.getenv('OPENAI_API_ENDPOINT'),
-    azure_deployment=os.getenv('OPENAI_API_MODEL_DEPLOYMENT_NAME'),
-    api_version=os.getenv('OPENAI_API_VERSION'),
+    azure_endpoint=os.getenv('OPENAI_ENDPOINT'),
+    azure_deployment=os.getenv('OPENAI_MODEL_DEPLOYMENT_NAME'),
+    api_version=os.getenv('OPENAI_VERSION'),
     streaming=True
 )
+
+
 
 graph_tools = GraphTools()
 tools= graph_tools.tools()
