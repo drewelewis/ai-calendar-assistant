@@ -1,6 +1,6 @@
 services:
   apiwrapper:
-    image: "drewl/simpleopenaiapiwrapper:latest"
+    image: "your container registry location/ai-calendar-assistant:latest"
     ports:
     - "80:80"
     - "443:443"
@@ -12,5 +12,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_VERSION=${OPENAI_API_VERSION}
       - OPENAI_MODEL_DEPLOYMENT_NAME=${OPENAI_MODEL_DEPLOYMENT_NAME}
-      - OPENAI_PROMPT=${OPENAI_PROMPT}
+      - OPENAI_PROMPT=${OPENAI_PROMPT}=${OPENAI_PROMPT}
+      - ENTRA_GRAPH_APPLICATION_CLIENT_ID=${ENTRA_GRAPH_APPLICATION_CLIENT_ID}
+      - ENTRA_GRAPH_APPLICATION_CLIENT_SECRET=${ENTRA_GRAPH_APPLICATION_CLIENT_SECRET}
+      - ENTRA_GRAPH_APPLICATION_TENANT_ID=${ENTRA_GRAPH_APPLICATION_TENANT_ID}
+
 

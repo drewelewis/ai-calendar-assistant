@@ -43,3 +43,17 @@ class client:
             model=model
         )
         return response
+
+if __name__ == "__main__":
+    # Example usage
+    client_instance = client()
+    print("Azure OpenAI client initialized successfully.")
+    
+    # Example completion request
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello, how can you assist me today?"}
+    ]
+    
+    response = client_instance.completion(messages)
+    print("Response:", response.choices[0].message.content)
