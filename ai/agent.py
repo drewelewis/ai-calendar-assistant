@@ -22,9 +22,9 @@ class Agent:
         self.graph_tools = GraphTools()
         self.all_tools = self.graph_tools.tools()
         self.llm = AzureChatOpenAI(
-            azure_endpoint=os.getenv('OPENAI_API_ENDPOINT'),
-            azure_deployment=os.getenv('OPENAI_API_MODEL_DEPLOYMENT_NAME'),
-            api_version=os.getenv('OPENAI_API_VERSION'),
+            azure_endpoint=os.getenv('OPENAI_ENDPOINT'),
+            azure_deployment=os.getenv('OPENAI_MODEL_DEPLOYMENT_NAME'),
+            api_version=os.getenv('OPENAI_VERSION'),
             streaming=False
         )
         self.llm_with_tools = self.llm.bind_tools(self.all_tools)
