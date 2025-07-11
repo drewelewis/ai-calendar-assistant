@@ -13,10 +13,10 @@ class client:
         if azure_api_key is None:
             raise ValueError("Please set the environment variable 'OPENAI_API_KEY' to your Azure OpenAI API key.")
         
-        api_version = os.environ.get("OPENAI_API_VERSION")
+        api_version = os.environ.get("OPENAI_VERSION")
         if api_version is None:
-            raise ValueError("Please set the environment variable 'OPENAI_API_VERSION' to your Azure OpenAI API version.")
-        
+            raise ValueError("Please set the environment variable 'OPENAI_VERSION' to your Azure OpenAI API version.")
+
         model_deployment_name = os.environ.get("OPENAI_MODEL_DEPLOYMENT_NAME")
         if model_deployment_name is None:
             raise ValueError("Please set the environment variable 'OPENAI_MODEL_DEPLOYMENT_NAME' to your Azure OpenAI model deployment name.")

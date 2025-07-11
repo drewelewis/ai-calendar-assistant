@@ -1,0 +1,3 @@
+echo Building Docker image...
+docker buildx build --tag ai-calendar-assistant:latest --file dockerfile .
+echo Build completed!

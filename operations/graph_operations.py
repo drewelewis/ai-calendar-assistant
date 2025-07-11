@@ -17,18 +17,6 @@ from msgraph.generated.models.location import Location
 from msgraph.generated.models.attendee import Attendee
 from msgraph.generated.models.email_address import EmailAddress
 
-# Replace with your values
-tenant_id = os.getenv("ENTRA_GRAPH_APPLICATION_TENANT_ID")
-client_id = os.getenv("ENTRA_GRAPH_APPLICATION_CLIENT_ID")
-client_secret = os.getenv("ENTRA_GRAPH_APPLICATION_CLIENT_SECRET")
-
-credential = ClientSecretCredential(tenant_id, client_id, client_secret)
-
-# scopes = ["https://graph.microsoft.com/.default"] # Or specific scopes like "Chat.ReadWrite"
-# Add chat.readAll for read access to all chats to scope
-scope = ["https://graph.microsoft.com/.default"]
-graph_client = GraphServiceClient(credential, scope)
-
 class GraphOperations:
     def __init__(self, user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"], calendar_response_fields=["subject", "start", "end", "location", "attendees"]):
         """
@@ -38,8 +26,23 @@ class GraphOperations:
         self.user_response_fields = user_response_fields
         self.calendar_response_fields = calendar_response_fields
 
+        # Replace with your values
+        self.tenant_id = os.environ.get("ENTRA_GRAPH_APPLICATION_TENANT_ID")
+        if self.tenant_id is None:
+            raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_TENANT_ID' to your Azure tenant ID.")
+
+        self.client_id = os.environ.get("ENTRA_GRAPH_APPLICATION_CLIENT_ID")
+        if self.client_id is None:
+            raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_ID' to your Azure application client ID.")
+
+        self.client_secret = os.environ.get("ENTRA_GRAPH_APPLICATION_CLIENT_SECRET")
+        if self.client_secret is None:
+            raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_SECRET' to your Azure application client secret.")
+
+        self.graph_client= self._get_client()
+
     def _get_client(self) -> GraphServiceClient:
-        credential = ClientSecretCredential(tenant_id, client_id, client_secret)
+        credential = ClientSecretCredential(self.tenant_id, self.client_id, self.client_secret)
         # scopes = ["https://graph.microsoft.com/.default"] # Or specific scopes like "Chat.ReadWrite"
         # Add chat.readAll for read access to all chats to scope
         scope = ["https://graph.microsoft.com/.default"]
@@ -53,9 +56,6 @@ class GraphOperations:
     # Get a user by user ID
     async def get_user_by_user_id(self, user_id: str) -> User | None:
         try:
-            graph_client = self._get_client()
-            # Configure the request with proper query parameters
-
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
                     
             # Select specific fields to reduce response size and ensure we get what we need
@@ -66,7 +66,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await graph_client.users.get(request_configuration=request_configuration)
+            response = await self.graph_client.users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value') and response.value:
                 # response.value is a list, get the first (and should be only) user
@@ -84,7 +84,6 @@ class GraphOperations:
     # Get a users manager by user ID
     async def get_users_manager_by_user_id(self, user_id: str) -> DirectoryObject  | None:
         try:
-            graph_client = self._get_client()
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -97,7 +96,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await graph_client.users.get(request_configuration=request_configuration)
+            response = await self.graph_client.users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value') and response.value:
                 # response.value is a list, get the first (and should be only) user
@@ -105,7 +104,7 @@ class GraphOperations:
                 
                 # Fetch manager details if available
                 try:
-                    manager = await graph_client.users.by_user_id(user_id).manager.get()
+                    manager = await self.graph_client.users.by_user_id(user_id).manager.get()
                 except Exception as manager_error:
                     print(f"Could not fetch manager for user {user_id}: {manager_error}")
                     manager = None
@@ -132,11 +131,11 @@ class GraphOperations:
             List[User]: List of User objects representing direct reports, empty list if none found
         """
         try:
-            graph_client = self._get_client()
+
             
             # Fetch direct reports details
-            direct_reports_response = await graph_client.users.by_user_id(user_id).direct_reports.get()
-            
+            direct_reports_response = await self.graph_client.users.by_user_id(user_id).direct_reports.get()
+
             if not direct_reports_response or not hasattr(direct_reports_response, 'value'):
                 return []
             
@@ -155,7 +154,6 @@ class GraphOperations:
     # Get all users in the Microsoft 365 Tenant Entra Directory
     async def get_all_users(self, max_results) -> List[User]:
         try:
-            graph_client = self._get_client()
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -167,8 +165,8 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await graph_client.users.get(request_configuration=request_configuration)
-        
+            response = await self.graph_client.users.get(request_configuration=request_configuration)
+
             if hasattr(response, 'value'):
                 users = response.value
                 return users
@@ -186,7 +184,7 @@ class GraphOperations:
     async def get_all_departments(self, max_results) -> List[str]:
         try:
             departments = set()  # Use a set to avoid duplicates
-            graph_client = self._get_client()
+
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -198,8 +196,8 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await graph_client.users.get(request_configuration=request_configuration)
-        
+            response = await self.graph_client.users.get(request_configuration=request_configuration)
+
             if hasattr(response, 'value'):
                 users = response.value
                 for user in users:
@@ -221,7 +219,6 @@ class GraphOperations:
         if not department:
             return []
         try:
-            graph_client = self._get_client()
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -239,9 +236,9 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            
-            response = await graph_client.users.get(request_configuration=request_configuration)
-        
+
+            response = await self.graph_client.users.get(request_configuration=request_configuration)
+
             if hasattr(response, 'value'):
                 users = response.value
                 return users
@@ -256,7 +253,6 @@ class GraphOperations:
         
     async def search_users(self, filter, max_results) -> List[User]:
         try:
-            graph_client = self._get_client()
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -273,8 +269,8 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await graph_client.users.get(request_configuration=request_configuration)
-        
+            response = await self.graph_client.users.get(request_configuration=request_configuration)
+
             if hasattr(response, 'value'):
                 users = response.value
                 return users
@@ -291,7 +287,6 @@ class GraphOperations:
     # Get calendar events for a user by user ID with optional date range
     async def get_calendar_events_by_user_id(self, user_id: str, start_date: str = None, end_date: str = None) -> DirectoryObject  | None:
         try:
-            graph_client = self._get_client()
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -304,7 +299,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            user_response = await graph_client.users.get(request_configuration=request_configuration)
+            user_response = await self.graph_client.users.get(request_configuration=request_configuration)
 
             if hasattr(user_response, 'value') and user_response.value:
                 # response.value is a list, get the first (and should be only) user
@@ -332,8 +327,8 @@ class GraphOperations:
                     events_request_config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
                         query_parameters=events_query_params
                     )
-                    
-                    event_response = await graph_client.users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
+
+                    event_response = await self.graph_client.users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
                     if hasattr(event_response, 'value') and event_response.value:
                         events = event_response.value
                     else:
@@ -355,7 +350,6 @@ class GraphOperations:
     # Create calendar event for a list of attendees and optional attendees
     async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, attendees: List[str] = None, optional_attendees: List[str] = None) -> Event:
         try:
-            graph_client = self._get_client()
             
             # Create the event object
             event = Event(
@@ -379,7 +373,7 @@ class GraphOperations:
                     event.attendees.append(Attendee(email_address=email_address, type="optional"))
             
             # Create the event in the user's calendar
-            created_event = await graph_client.users.by_user_id(user_id).calendar.events.post(event)
+            created_event = await self.graph_client.users.by_user_id(user_id).calendar.events.post(event)
             return created_event
             
         except Exception as e:

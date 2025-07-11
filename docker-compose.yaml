@@ -1,6 +1,6 @@
 services:
   apiwrapper:
-    image: "your container registry location/ai-calendar-assistant:latest"
+    image: "drewl/ai-calendar-assistant:latest"
     ports:
     - "80:80"
     - "443:443"
