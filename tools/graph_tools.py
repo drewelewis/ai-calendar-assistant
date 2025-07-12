@@ -1,5 +1,7 @@
 import os
 import asyncio
+import concurrent.futures
+import threading
 from typing import List, Optional, Type
 from langchain_core.callbacks import CallbackManagerForToolRun, AsyncCallbackManagerForToolRun
 from langchain_core.tools import BaseTool
@@ -16,6 +18,32 @@ graph_operations=GraphOperations(
     calendar_response_fields=["id", "subject", "start", "end", "location", "attendees"]
 )
 max_results=100
+
+def run_async_safely(async_func, *args, **kwargs):
+    """
+    Helper function to run async functions safely in sync context.
+    Handles event loop conflicts by creating a new loop in a separate thread if needed.
+    """
+    try:
+        # Check if there's already a running loop
+        loop = asyncio.get_running_loop()
+        # We're already in an async context, create a new event loop in a thread
+        def run_in_thread():
+            # Create a new event loop for this thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(async_func(*args, **kwargs))
+            finally:
+                new_loop.close()
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_thread)
+            return future.result()
+    except RuntimeError:
+        # No event loop is running, we can use asyncio.run
+        return asyncio.run(async_func(*args, **kwargs))
+
 class GraphTools():
 
     class UserSearch(BaseTool):
@@ -51,21 +79,10 @@ class GraphTools():
         def _run(self, filter: str) -> List[dict]:
             """Synchronous version - runs the async method in an event loop"""
             try:
-                # Try to get the current event loop
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If we're already in an async context, we need to handle this differently
-                    # This is a fallback that shouldn't normally be used in async context
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.search_users(filter,max_results=max_results))
-                        return future.result()
-                else:
-                    # If no loop is running, we can use asyncio.run
-                    return asyncio.run(graph_operations.search_users(filter,max_results=max_results))
-            except RuntimeError:
-                # If we can't get a loop, create a new one
-                return asyncio.run(graph_operations.search_users(filter,max_results=max_results))
+                return run_async_safely(graph_operations.search_users, filter, max_results=max_results)
+            except Exception as e:
+                print(f"Error in UserSearch._run: {e}")
+                return []
 
         async def _arun(self, filter: str, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[dict]:
             """Async version - preferred when in async context"""
@@ -93,16 +110,10 @@ class GraphTools():
         def _run(self, user_id: str) -> dict:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_user_by_user_id(user_id))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_user_by_user_id(user_id))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_user_by_user_id(user_id))
+                return run_async_safely(graph_operations.get_user_by_user_id, user_id)
+            except Exception as e:
+                print(f"Error in GetUserById._run: {e}")
+                return {}
 
         async def _arun(self, user_id: str, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> dict:
             """Async version"""
@@ -130,16 +141,10 @@ class GraphTools():
         def _run(self, user_id: str) -> dict:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_users_manager_by_user_id(user_id))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_users_manager_by_user_id(user_id))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_users_manager_by_user_id(user_id))
+                return run_async_safely(graph_operations.get_users_manager_by_user_id, user_id)
+            except Exception as e:
+                print(f"Error in GetUserManager._run: {e}")
+                return {}
 
         async def _arun(self, user_id: str, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> dict:
             """Async version"""
@@ -167,16 +172,10 @@ class GraphTools():
         def _run(self, user_id: str) -> List[dict]:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_direct_reports_by_user_id(user_id))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_direct_reports_by_user_id(user_id))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_direct_reports_by_user_id(user_id))
+                return run_async_safely(graph_operations.get_direct_reports_by_user_id, user_id)
+            except Exception as e:
+                print(f"Error in GetDirectReports._run: {e}")
+                return []
 
         async def _arun(self, user_id: str, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[dict]:
             """Async version"""
@@ -206,16 +205,10 @@ class GraphTools():
         def _run(self, max_results: int = 100) -> List[dict]:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_all_users(max_results))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_all_users(max_results))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_all_users(max_results))
+                return run_async_safely(graph_operations.get_all_users, max_results)
+            except Exception as e:
+                print(f"Error in GetAllUsers._run: {e}")
+                return []
 
         async def _arun(self, max_results: int = 100, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[dict]:
             """Async version"""
@@ -226,6 +219,13 @@ class GraphTools():
         description: str = """
            Useful for when you need to get all users from a specific department in Microsoft 365 Tenant Entra Directory.
            Returns a list of users from the specified department.
+
+           When searching for departments, you need to be aware that the department names may vary.
+           Before using this tool, you can use the GetAllDepartments tool to get a list of all unique departments in the tenant.
+           You can then use the department names from that list to filter users.
+           If you are not sure about the exact department name to choose, never guess, you will ask the user to clarify.
+
+
         """.strip()
         return_direct: bool = False
 
@@ -252,16 +252,10 @@ class GraphTools():
         def _run(self, department: str, max_results: int = 100) -> List[dict]:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_users_by_department(department, max_results))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_users_by_department(department, max_results))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_users_by_department(department, max_results))
+                return run_async_safely(graph_operations.get_users_by_department, department, max_results)
+            except Exception as e:
+                print(f"Error in GetUsersByDepartment._run: {e}")
+                return []
 
         async def _arun(self, department: str, max_results: int = 100, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[dict]:
             """Async version"""
@@ -292,16 +286,10 @@ class GraphTools():
         def _run(self, max_results: int = 100) -> List[str]:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_all_departments(max_results))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_all_departments(max_results))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_all_departments(max_results))
+                return run_async_safely(graph_operations.get_all_departments, max_results)
+            except Exception as e:
+                print(f"Error in GetAllDepartments._run: {e}")
+                return []
 
         async def _arun(self, max_results: int = 100, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[str]:
             """Async version"""
@@ -344,16 +332,10 @@ class GraphTools():
         def _run(self, user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[dict]:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.get_calendar_events_by_user_id(user_id, start_date, end_date))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.get_calendar_events_by_user_id(user_id, start_date, end_date))
-            except RuntimeError:
-                return asyncio.run(graph_operations.get_calendar_events_by_user_id(user_id, start_date, end_date))
+                return run_async_safely(graph_operations.get_calendar_events_by_user_id, user_id, start_date, end_date)
+            except Exception as e:
+                print(f"Error in GetCalendarEvents._run: {e}")
+                return []
 
         async def _arun(self, user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[dict]:
             """Async version"""
@@ -408,19 +390,11 @@ class GraphTools():
                 attendees: Optional[List[str]] = None, optional_attendees: Optional[List[str]] = None) -> dict:
             """Synchronous version"""
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, graph_operations.create_calendar_event(
-                            user_id, subject, start, end, location, attendees, optional_attendees))
-                        return future.result()
-                else:
-                    return asyncio.run(graph_operations.create_calendar_event(
-                        user_id, subject, start, end, location, attendees, optional_attendees))
-            except RuntimeError:
-                return asyncio.run(graph_operations.create_calendar_event(
-                    user_id, subject, start, end, location, attendees, optional_attendees))
+                return run_async_safely(graph_operations.create_calendar_event,
+                    user_id, subject, start, end, location, attendees, optional_attendees)
+            except Exception as e:
+                print(f"Error in CreateCalendarEvent._run: {e}")
+                return {}
 
         async def _arun(self, user_id: str, subject: str, start: str, end: str, location: Optional[str] = None, 
                        attendees: Optional[List[str]] = None, optional_attendees: Optional[List[str]] = None,

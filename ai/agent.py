@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Annotated
 
 from typing_extensions import TypedDict
@@ -8,11 +9,15 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 
+# Import LangChain message types
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
 from langchain_openai import AzureChatOpenAI
 
 from dotenv import load_dotenv
 from prompts.graph_prompts import prompts
 from tools.graph_tools import GraphTools
+from models.openai_models import OpenAIModels
  
 load_dotenv(override=True)
 
@@ -39,9 +44,7 @@ class Agent:
 
     def stream_graph_updates(self, role: str, content: str):
         config = {"configurable": {"thread_id": "1"}}
-        
-        # Import LangChain message types
-        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
         
         # Create proper LangChain message object
         if role == "user":
@@ -148,9 +151,7 @@ class Agent:
         """
         if config is None:
             config = {"configurable": {"thread_id": "1"}}
-        
-        # Import LangChain message types
-        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
         
         # Format messages to ensure they are LangChain Message objects
         formatted_messages = []
@@ -188,10 +189,37 @@ class Agent:
         
         messages = formatted_messages
 
-        return self.graph.invoke(
-            {"messages": messages, "recursions": 0},
-            config
-        )
+        # Create initial state with formatted messages
+        initial_state = {
+            "messages": messages, 
+            "recursions": 0
+        }
+        # if the first message is not a system message, append the system message
+
+        if not messages or (messages and not isinstance(messages[0], SystemMessage)):
+            initial_state["messages"].insert(0, SystemMessage(content=self.system_message))
+
+        # Invoke the graph and get the result
+        results = self.graph.invoke(initial_state, config)
+        
+         # Convert LangChain Message objects back to OpenAIModels.Message
+        messages = []
+        for msg in results["messages"]:
+            if msg.type == "system":
+                role = "system"
+            elif msg.type == "human":
+                role = "user"
+            elif msg.type == "ai":
+                role = "assistant"
+                # If the AI message has tool calls, convert them to JSON
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    msg.content = json.dumps(msg.tool_calls)
+            elif msg.type == "tool":
+                role = "tool"
+           
+
+            messages.append(OpenAIModels.Message(role=role, content=msg.content))
+        return messages
 
     
 

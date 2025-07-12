@@ -5,7 +5,7 @@ from pydantic import Field
 class OpenAIModels():
 
     class Message(BaseModel):
-        role: str = Field(..., description="Type of the message, e.g., 'user' or 'assistant' or 'system'")
+        role: str = Field(..., description="Type of the message, e.g., 'user' or 'assistant' or 'system' or 'tool'")
         content: str = Field(..., description="Content of the message")
 
     class Messages(BaseModel):

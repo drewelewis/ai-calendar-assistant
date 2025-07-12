@@ -13,6 +13,7 @@ class GraphModels():
         DisplayName: str = Field(..., description="Email of the user")
         JobTitle: str = Field(..., description="Job title of the user")
         Department: str = Field(..., description="Department of the user")
+        Email: str = Field(..., description="Email of the user")
 
 
 

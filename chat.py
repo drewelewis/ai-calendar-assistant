@@ -37,18 +37,12 @@ class GraphState(TypedDict):
 # Define recursion limit
 MAX_RECURSIONS = 25
 
-
-system_message="Today's date and time: " + current_datetime + "\n\n"
-system_message= system_message + prompts.master_prompt()
-
 llm  = AzureChatOpenAI(
     azure_endpoint=os.getenv('OPENAI_ENDPOINT'),
     azure_deployment=os.getenv('OPENAI_MODEL_DEPLOYMENT_NAME'),
     api_version=os.getenv('OPENAI_VERSION'),
     streaming=True
 )
-
-
 
 graph_tools = GraphTools()
 tools= graph_tools.tools()
@@ -177,7 +171,7 @@ graph=build_graph()
 
 
 
-def main():
+async def main():
     print("=" * 60)
     print("=" * 60)
     print("=" * 60)
@@ -207,8 +201,9 @@ def main():
                 print("=" * 60)
                 continue
             
-            # Process normal user input - now using async
-            ai_message = asyncio.run(stream_graph_updates("user", user_input))
+            # Process normal user input - now using await directly
+            await stream_graph_updates("system", prompts.master_prompt())
+            ai_message = await stream_graph_updates("user", user_input)
             
             # Check if we need to suggest a reset due to recursion limit
             if hasattr(ai_message, 'content') and "recursion limit" in str(ai_message.content).lower():
@@ -225,4 +220,4 @@ def main():
             continue
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
