@@ -28,26 +28,45 @@ class GraphOperations:
 
         # Replace with your values
         self.tenant_id = os.environ.get("ENTRA_GRAPH_APPLICATION_TENANT_ID")
-        if self.tenant_id is None:
-            raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_TENANT_ID' to your Azure tenant ID.")
+        # Deferred validation - will check when client is actually needed
+        # if self.tenant_id is None:
+        #     raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_TENANT_ID' to your Azure tenant ID.")
 
         self.client_id = os.environ.get("ENTRA_GRAPH_APPLICATION_CLIENT_ID")
-        if self.client_id is None:
-            raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_ID' to your Azure application client ID.")
+        # if self.client_id is None:
+        #     raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_ID' to your Azure application client ID.")
 
         self.client_secret = os.environ.get("ENTRA_GRAPH_APPLICATION_CLIENT_SECRET")
-        if self.client_secret is None:
-            raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_SECRET' to your Azure application client secret.")
+        # if self.client_secret is None:
+        #     raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_SECRET' to your Azure application client secret.")
 
-        self.graph_client= self._get_client()
+        self.graph_client = None  # Lazy initialization
 
     def _get_client(self) -> GraphServiceClient:
-        credential = ClientSecretCredential(self.tenant_id, self.client_id, self.client_secret)
-        # scopes = ["https://graph.microsoft.com/.default"] # Or specific scopes like "Chat.ReadWrite"
-        # Add chat.readAll for read access to all chats to scope
-        scope = ["https://graph.microsoft.com/.default"]
-        graph_client = GraphServiceClient(credential, scope)
-        return graph_client
+        """Get or create the Graph client with lazy initialization."""
+        if self.graph_client is None:
+            try:
+                print("🔄 Initializing Microsoft Graph client...")
+                
+                # Validate credentials when actually needed
+                if self.tenant_id is None:
+                    raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_TENANT_ID' to your Azure tenant ID.")
+                if self.client_id is None:
+                    raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_ID' to your Azure application client ID.")
+                if self.client_secret is None:
+                    raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_SECRET' to your Azure application client secret.")
+                
+                credential = ClientSecretCredential(self.tenant_id, self.client_id, self.client_secret)
+                # scopes = ["https://graph.microsoft.com/.default"] # Or specific scopes like "Chat.ReadWrite"
+                # Add chat.readAll for read access to all chats to scope
+                scope = ["https://graph.microsoft.com/.default"]
+                self.graph_client = GraphServiceClient(credential, scope)
+                print("✓ Microsoft Graph client initialized successfully!")
+            except Exception as e:
+                print(f"❌ Failed to initialize Microsoft Graph client: {e}")
+                print("🔧 Please check your ENTRA_GRAPH_APPLICATION_* environment variables")
+                raise
+        return self.graph_client
     
     # Get Current Date and Time
     def get_current_datetime(self) -> str:
@@ -66,7 +85,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await self.graph_client.users.get(request_configuration=request_configuration)
+            response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value') and response.value:
                 # response.value is a list, get the first (and should be only) user
@@ -96,7 +115,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await self.graph_client.users.get(request_configuration=request_configuration)
+            response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value') and response.value:
                 # response.value is a list, get the first (and should be only) user
@@ -104,7 +123,7 @@ class GraphOperations:
                 
                 # Fetch manager details if available
                 try:
-                    manager = await self.graph_client.users.by_user_id(user_id).manager.get()
+                    manager = await self._get_client().users.by_user_id(user_id).manager.get()
                 except Exception as manager_error:
                     print(f"Could not fetch manager for user {user_id}: {manager_error}")
                     manager = None
@@ -134,7 +153,7 @@ class GraphOperations:
 
             
             # Fetch direct reports details
-            direct_reports_response = await self.graph_client.users.by_user_id(user_id).direct_reports.get()
+            direct_reports_response = await self._get_client().users.by_user_id(user_id).direct_reports.get()
 
             if not direct_reports_response or not hasattr(direct_reports_response, 'value'):
                 return []
@@ -165,7 +184,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await self.graph_client.users.get(request_configuration=request_configuration)
+            response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value'):
                 users = response.value
@@ -196,7 +215,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await self.graph_client.users.get(request_configuration=request_configuration)
+            response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value'):
                 users = response.value
@@ -237,7 +256,7 @@ class GraphOperations:
                 query_parameters=query_params
             )
 
-            response = await self.graph_client.users.get(request_configuration=request_configuration)
+            response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value'):
                 users = response.value
@@ -269,7 +288,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            response = await self.graph_client.users.get(request_configuration=request_configuration)
+            response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(response, 'value'):
                 users = response.value
@@ -299,7 +318,7 @@ class GraphOperations:
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
-            user_response = await self.graph_client.users.get(request_configuration=request_configuration)
+            user_response = await self._get_client().users.get(request_configuration=request_configuration)
 
             if hasattr(user_response, 'value') and user_response.value:
                 # response.value is a list, get the first (and should be only) user
@@ -328,7 +347,7 @@ class GraphOperations:
                         query_parameters=events_query_params
                     )
 
-                    event_response = await self.graph_client.users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
+                    event_response = await self._get_client().users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
                     if hasattr(event_response, 'value') and event_response.value:
                         events = event_response.value
                     else:
@@ -373,7 +392,7 @@ class GraphOperations:
                     event.attendees.append(Attendee(email_address=email_address, type="optional"))
             
             # Create the event in the user's calendar
-            created_event = await self.graph_client.users.by_user_id(user_id).calendar.events.post(event)
+            created_event = await self._get_client().users.by_user_id(user_id).calendar.events.post(event)
             return created_event
             
         except Exception as e:

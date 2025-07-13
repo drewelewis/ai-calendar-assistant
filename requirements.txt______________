@@ -5,9 +5,11 @@ typing==3.7.4.3
 openai==1.95.1
 httpx==0.27.2
 
-# Semantic Kernel requirements
-semantic-kernel
-python-dotenv
+langchain==0.3.26
+langgraph==0.5.2
+langchain-openai==0.3.27
+langchain_community==0.3.27
+langgraph-checkpoint-postgres==2.0.22
 
 asyncio
 azure-identity==1.23.0
@@ -15,6 +17,8 @@ msgraph-sdk
 msal
 requests
 psycopg2
+
+
 
 
 

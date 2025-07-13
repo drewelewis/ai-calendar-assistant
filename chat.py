@@ -1,223 +1,110 @@
-import sys
-
+# Copyright (c) Microsoft. All rights reserved.
 import os
-import json
-import datetime
-import uuid
 import asyncio
-from time import sleep
 from typing import Annotated
 
-from typing_extensions import TypedDict
+from semantic_kernel import Kernel
+from semantic_kernel.agents import ChatCompletionAgent, ChatHistoryAgentThread
+from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
+from semantic_kernel.functions import KernelArguments, kernel_function
+from semantic_kernel.connectors.ai import FunctionChoiceBehavior
 
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langchain_core.messages import ToolMessage
-from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.utils.function_calling import format_tool_to_openai_function
-
-from langchain_openai import AzureChatOpenAI
-from IPython.display import Image, display
-
-from utils.langgraph_utils import save_graph
-from dotenv import load_dotenv
+from plugins.graph_plugin import GraphPlugin
 from prompts.graph_prompts import prompts
-from tools.graph_tools import GraphTools
- 
-load_dotenv(override=True)
-current_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+"""
+This file implements a chat assistant that integrates with Microsoft Graph API
+to help users with calendar management and organization information.
 
-class GraphState(TypedDict):
-    messages: Annotated[list, add_messages]
-    recursions: int
+The assistant uses Azure OpenAI to power the chat completion and Semantic Kernel
+to handle the orchestration. GraphPlugin provides the Microsoft Graph functionality
+for accessing organizational data and calendar operations.
 
+The interaction with the agent is via the `get_response` method, which sends a
+user input to the agent and receives a response. The conversation history is
+maintained in a ChatHistoryAgentThread object.
+"""
 
-# Define recursion limit
-MAX_RECURSIONS = 25
-
-llm  = AzureChatOpenAI(
-    azure_endpoint=os.getenv('OPENAI_ENDPOINT'),
-    azure_deployment=os.getenv('OPENAI_MODEL_DEPLOYMENT_NAME'),
-    api_version=os.getenv('OPENAI_VERSION'),
-    streaming=True
-)
-
-graph_tools = GraphTools()
-tools= graph_tools.tools()
-llm_with_tools = llm.bind_tools(tools)
-
-async def stream_graph_updates(role: str, content: str):
-    config = {"configurable": {"thread_id": "1"}}
-    events = graph.astream(
-        {
-            "messages": [{"role": role, "content": content}],
-            "recursions": 0},
-        config,
-        stream_mode="values",
-    )
-    
-    async for event in events:
-        # print(event)
-        if "messages" in event:
-            last_message = event["messages"][-1]
-            # # Only print non-tool messages (hide tool calls and tool responses)
-            # # Check for ToolMessage type or messages with tool_calls
-            # if hasattr(last_message, '__class__'):
-            #     message_type = last_message.__class__.__name__
-            #     if message_type in ['ToolMessage']:
-            #         continue  # Skip tool messages
-            
-            # # Also skip AI messages that contain tool calls (but show the final response)
-            # if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            #     continue  # Skip messages with tool calls
-                
-            # Print all other messages (user messages and AI responses without tool calls)
-            last_message.pretty_print()
-
-        last_message=event["messages"][-1]
-    return last_message
-
-
-# Define Nodes
-async def chat_node(state: GraphState):
-
-    # Extract the current list of messages from the state
-    messages = state["messages"]
-    recursions= state["recursions"]
-
-    # Check recursion limit
-    if recursions >= MAX_RECURSIONS:
-        print(f"  - Recursion limit of {MAX_RECURSIONS} reached. Ending conversation.")
-        return {"messages": [{"role": "assistant", "content": f"I've reached the maximum recursion limit of {MAX_RECURSIONS}. Please start a new conversation."}], "recursions": recursions}
-
-    # Print the current state for debugging
-    # print("chat_node: Current state:")
-    # print(f"  - Messages: {messages}")
-    print(f"  - Recursions: {recursions}")
-
-    # Print the incoming messages for debugging
-    # print("chat_node: Received messages:")
-    # for msg in messages:
-        # print(f"  - {msg}")    # Invoke the LLM with tools, passing the current messages
-    response = await llm_with_tools.ainvoke(messages)
-
-    # Print the response from the LLM for debugging
-    # print("chat_node: LLM response:")
-    # print(response.content)
-    
-    # Return the updated state with the new message appended
-    return {"messages": [response], "recursions": recursions + 1}
-
-
-def should_continue(state: GraphState):
-    """Determine whether to continue with tools or end based on recursion limit and tool calls."""
-    recursions = state["recursions"]
-    
-    # If we've hit the recursion limit, end the conversation
-    if recursions >= MAX_RECURSIONS:
-        return END
-    
-    # Otherwise, use the standard tools_condition to decide
-    last_message = state["messages"][-1]
-    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-        return "tools"
-    else:
-        return END
-
-
-# Global memory saver for state management
-memory = MemorySaver()
-
-# Init Graph
-def build_graph():
-    global memory
-    graph_builder = StateGraph(GraphState)
-    graph_builder.add_node("chat_node", chat_node)
-    graph_builder.add_edge(START, "chat_node")
-
-    tool_node = ToolNode(tools=tools)
-    graph_builder.add_node("tools", tool_node)
-    graph_builder.add_conditional_edges(
-        "chat_node",
-        should_continue,
-    )
-    graph_builder.add_edge("tools", "chat_node")
-    graph = graph_builder.compile(checkpointer=memory)
-
-    image_path = __file__.replace(".py", ".png")
-    save_graph(image_path,graph)
-    
-    return graph
-
-def clear_conversation_state():
-    """Clear all conversation state from memory."""
-    global memory, graph
-    
-    try:
-        # Clear the memory saver by creating a new instance
-        memory = MemorySaver()
-        # Rebuild the graph with the new memory
-        graph = build_graph()
-        print("✓ Conversation state cleared successfully.")
-        print("✓ Memory reset complete.")
-        print("✓ Ready for new conversation.")
-    except Exception as e:
-        print(f"⚠ Error clearing state: {e}")
-        print("You may need to restart the application for a complete reset.")
-
-graph=build_graph()
-
+# Sample user inputs to demonstrate the AI calendar assistant functionality
+USER_INPUTS = [
+    "Logging in as user Id 69149650-b87e-44cf-9413-db5c1a5b6d3f",
+    "Who is our CEO?",
+    "Can you get me the full org chart of our organization?",
+    "Now can you help me schedule a meeting with the executive team?",
+    "Yes, these are the folks I want to be included.",
+    "The meeting will have to be this Tuesday, in the morning if possible.",
+    "I want to meet for 30 minutes.",
+]
 
 
 async def main():
-    print("=" * 60)
-    print("=" * 60)
-    print("=" * 60)
-    print("Meeting Scheduling Assistant")
-    print("Commands:")
-    print("  • Type '/q' or '/quit' to exit")
-    print("  • Type '/reset' or '/r' to clear conversation state and start fresh")
-    print("  • Type your question or command to interact with the AI")
-    print("=" * 60)
+    # 1. Create the instance of the Kernel to register an AI service
+    endpoint = os.getenv("OPENAI_ENDPOINT")
+    api_key = os.getenv("OPENAI_API_KEY")
+    api_version = os.getenv("OPENAI_VERSION")
+    deployment_name = os.getenv("OPENAI_MODEL_DEPLOYMENT_NAME")
+    
+    # Validate required environment variables
+    if not all([endpoint, api_key, deployment_name]):
+        raise ValueError(
+            "Missing required environment variables. Please ensure OPENAI_ENDPOINT, "
+            "OPENAI_API_KEY, and OPENAI_MODEL_DEPLOYMENT_NAME are set in the .env file."
+        )
+    
+    # 2. Create the Kernel and register plugins
+    service_id = "agent"
+    kernel = Kernel()
+    
+    # Add the Microsoft Graph plugin with optional debug mode
+    graph_debug = os.getenv("GRAPH_DEBUG", "false").lower() == "true"
+    kernel.add_plugin(GraphPlugin(debug=graph_debug), plugin_name="graph")
 
-    count = 0
-    while True:
-        try:
-            if count == 0:
-                user_input = "logging in as user Id 69149650-b87e-44cf-9413-db5c1a5b6d3f"
-            else:
-                user_input = input("> ")
-            print("")
-            
-            if user_input.lower() in ["/q", "/quit"]:
-                print("👋 Goodbye!")
-                break
-                
-            elif user_input.lower() in ["/reset", "/r"]:
-                print("🔄 Clearing conversation state and starting new conversation...")
-                clear_conversation_state()
-                print("=" * 60)
-                continue
-            
-            # Process normal user input - now using await directly
-            await stream_graph_updates("system", prompts.master_prompt())
-            ai_message = await stream_graph_updates("user", user_input)
-            
-            # Check if we need to suggest a reset due to recursion limit
-            if hasattr(ai_message, 'content') and "recursion limit" in str(ai_message.content).lower():
-                print("\n💡 Tip: Type '/reset' to start a new conversation with a fresh context.")
-            
-            # print(ai_message.content)
-            count=count+1
-        except KeyboardInterrupt:
-            print("\n\n⚠ Interrupted by user. Type '/q' to quit properly.")
-            continue
-        except Exception as e:
-            print(f"❌ An error occurred: {e}")
-            print("💡 Tip: Type '/reset' to start a new conversation or '/q' to quit.")
-            continue
+    # 3. Add Azure OpenAI service to the kernel
+    kernel.add_service(AzureChatCompletion(
+        deployment_name=deployment_name,
+        endpoint=endpoint,
+        api_key=api_key,
+        api_version=api_version or "2023-05-15",
+        service_id=service_id))
+
+    # 4. Configure the function choice behavior to auto invoke kernel functions
+    # so that the agent can automatically execute Graph plugin functions when needed
+    settings = kernel.get_prompt_execution_settings_from_service_id(service_id=service_id)
+    settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
+
+    # 5. Create the agent with the master prompt from graph_prompts
+    agent = ChatCompletionAgent(
+        kernel=kernel,
+        name="Agent",
+        instructions=prompts.master_prompt(),
+        arguments=KernelArguments(settings=settings),
+    )
+
+    # 6. Create a thread to hold the conversation
+    thread: ChatHistoryAgentThread = None
+
+    # 7. Process each user input and get agent responses
+    for user_input in USER_INPUTS:
+        print(f"# User: {user_input}")
+        response = await agent.get_response(
+            messages=user_input,
+            thread=thread,
+        )
+        print(f"# {response.name}: {response}")
+        thread = response.thread
+
+    # 8. Cleanup: Clear the thread
+    await thread.delete() if thread else None
+
+    """
+    Sample output would include responses related to:
+    - Authentication confirmation
+    - Organizational information (CEO details)
+    - Organization chart data
+    - Meeting scheduling with executive team
+    - Meeting time and duration confirmation
+    """
+
 
 if __name__ == "__main__":
     asyncio.run(main())

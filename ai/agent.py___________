@@ -149,6 +149,8 @@ class Agent:
         Returns:
             dict: The final state of the graph after processing the messages.
         """
+
+        print("Invoking graph with messages:", messages)
         if config is None:
             config = {"configurable": {"thread_id": "1"}}
 
@@ -201,6 +203,12 @@ class Agent:
 
         # Invoke the graph and get the result
         results = self.graph.invoke(initial_state, config)
+
+        # Check if the result is empty
+        if not results or "messages" not in results or not results["messages"]:
+            return "No messages returned from the graph."
+        
+        return results["messages"][-1].content
         
          # Convert LangChain Message objects back to OpenAIModels.Message
         messages = []
