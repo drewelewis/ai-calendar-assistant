@@ -13,6 +13,8 @@ from semantic_kernel.functions import KernelArguments, kernel_function
 from semantic_kernel.connectors.ai import FunctionChoiceBehavior
 
 from azure.cosmos import CosmosClient, PartitionKey
+from azure.identity import DefaultAzureCredential, ManagedIdentityCredential, EnvironmentCredential
+from azure.core.exceptions import ClientAuthenticationError
 
 from plugins.graph_plugin import GraphPlugin
 from prompts.graph_prompts import prompts
@@ -31,11 +33,23 @@ maintained in a ChatHistoryAgentThread object and persisted in Azure CosmosDB.
 """
 
 class CosmosDBChatHistoryManager:
-    """Manages chat history persistence with Azure Cosmos DB."""
+    """Manages chat history persistence with Azure Cosmos DB using Azure Identity."""
     
-    def __init__(self, endpoint, key, database_name, container_name):
-        """Initialize the CosmosDB client and container."""
-        self.client = CosmosClient(endpoint, key)
+    def __init__(self, endpoint, database_name, container_name, credential=None):
+        """
+        Initialize the CosmosDB client using Azure Identity.
+        
+        Args:
+            endpoint: CosmosDB endpoint URL
+            database_name: Name of the database
+            container_name: Name of the container
+            credential: Optional Azure credential. If None, uses get_azure_credential()
+        """
+        if credential is None:
+            # Use our custom credential getter with fallback options
+            credential = get_azure_credential()
+        
+        self.client = CosmosClient(endpoint, credential=credential)
         self.database = self.client.create_database_if_not_exists(id=database_name)
         self.container = self.database.create_container_if_not_exists(
             id=container_name,
@@ -118,29 +132,38 @@ class CosmosDBChatHistoryManager:
         }
         
         # Save to Cosmos DB
-        self.container.create_item(body=chat_history_document)
-        return session_id
+        try:
+            self.container.create_item(body=chat_history_document)
+            return session_id
+        except Exception as e:
+            print(f"Error saving chat history to CosmosDB: {e}")
+            # Re-raise the exception so calling code can handle it
+            raise
         
     async def load_chat_history(self, session_id):
         """Load chat history from Cosmos DB and create a new thread."""
-        query = f"SELECT * FROM c WHERE c.sessionId = '{session_id}' ORDER BY c.timestamp DESC"
-        items = list(self.container.query_items(query=query, enable_cross_partition_query=True))
-        
-        if not items:
-            return None
+        try:
+            query = f"SELECT * FROM c WHERE c.sessionId = '{session_id}' ORDER BY c.timestamp DESC"
+            items = list(self.container.query_items(query=query, enable_cross_partition_query=True))
             
-        # Take the most recent chat history
-        chat_history = items[0]
-        
-        # Return the raw messages - thread recreation will be handled by the calling code
-        return chat_history["messages"]
+            if not items:
+                return None
+                
+            # Take the most recent chat history
+            chat_history = items[0]
+            
+            # Return the raw messages - thread recreation will be handled by the calling code
+            return chat_history["messages"]
+        except Exception as e:
+            print(f"Error loading chat history from CosmosDB: {e}")
+            return None
 
 # Sample user inputs to demonstrate the AI calendar assistant functionality
 USER_INPUTS = [
     "Logging in as user Id 69149650-b87e-44cf-9413-db5c1a5b6d3f",
-    "Who is our CEO?",
-    "Can you get me the full org chart of our organization?",
-    "Can you get me a list of all departments in our organization?",
+    # "Who is our CEO?",
+    # "Can you get me the full org chart of our organization?",
+    # "Can you get me a list of all departments in our organization?",
     "Now can you help me schedule a meeting with the executive team?",
     "I want everyone from the executive team to be invited.",
     "The subject of the meeting will be quarterly results and future plans.",
@@ -159,7 +182,7 @@ async def main():
     
     # Add CosmosDB configuration
     cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
-    cosmos_key = os.getenv("COSMOS_KEY")
+    # cosmos_key is no longer needed for AAD auth
     cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
     cosmos_container = os.getenv("COSMOS_CONTAINER", "ChatHistory")
     
@@ -170,17 +193,22 @@ async def main():
             "OPENAI_API_KEY, and OPENAI_MODEL_DEPLOYMENT_NAME are set in the .env file."
         )
     
-    if not all([cosmos_endpoint, cosmos_key]):
-        print("Warning: CosmosDB environment variables not set. Chat history will not be persisted.")
+    if not cosmos_endpoint:
+        print("Warning: COSMOS_ENDPOINT environment variable not set. Chat history will not be persisted.")
         cosmos_manager = None
     else:
-        # Initialize CosmosDB manager
-        cosmos_manager = CosmosDBChatHistoryManager(
-            cosmos_endpoint, 
-            cosmos_key, 
-            cosmos_database, 
-            cosmos_container
-        )
+        # Initialize CosmosDB manager with Azure Identity
+        try:
+            cosmos_manager = CosmosDBChatHistoryManager(
+                cosmos_endpoint, 
+                cosmos_database, 
+                cosmos_container
+            )
+            print("CosmosDB initialized with Azure Identity authentication")
+        except Exception as e:
+            print(f"Warning: Failed to initialize CosmosDB with Azure Identity: {e}")
+            print("Chat history will not be persisted.")
+            cosmos_manager = None
     
     # 2. Create the Kernel and register plugins
     service_id = "agent"
@@ -252,6 +280,45 @@ async def main():
     # 8. Optional cleanup (you might want to keep history in CosmosDB instead)
     # await thread.delete() if thread else None
     print("Conversation completed. Chat history is stored in CosmosDB.")
+
+
+def get_azure_credential():
+    """
+    Get Azure credentials with fallback options.
+    Tries multiple authentication methods in order of preference:
+    1. Environment variables (for CI/CD)
+    2. Managed Identity (for Azure-hosted applications)
+    3. DefaultAzureCredential (interactive/local development)
+    """
+    try:
+        # Try environment credential first (good for CI/CD)
+        credential = EnvironmentCredential()
+        # Test the credential
+        credential.get_token("https://cosmos.azure.com/.default")
+        return credential
+    except Exception:
+        pass
+    
+    try:
+        # Try managed identity (good for Azure-hosted apps)
+        credential = ManagedIdentityCredential()
+        # Test the credential
+        credential.get_token("https://cosmos.azure.com/.default")
+        return credential
+    except Exception:
+        pass
+    
+    try:
+        # Fall back to DefaultAzureCredential (includes interactive auth)
+        credential = DefaultAzureCredential(exclude_visual_studio_code_credential=False)
+        # Test the credential
+        credential.get_token("https://cosmos.azure.com/.default")
+        return credential
+    except Exception as e:
+        raise ClientAuthenticationError(
+            f"Failed to authenticate with Azure. Please ensure you are logged in via Azure CLI "
+            f"or have appropriate credentials configured. Error: {e}"
+        )
 
 
 if __name__ == "__main__":

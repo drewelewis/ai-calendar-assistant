@@ -11,6 +11,7 @@ python-dotenv
 
 asyncio
 azure-identity==1.23.0
+azure-core==1.32.0
 msgraph-sdk
 msal
 requests

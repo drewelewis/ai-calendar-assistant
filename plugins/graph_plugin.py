@@ -1,3 +1,4 @@
+from datetime import date
 import os
 import asyncio
 from typing import List, Optional, Annotated
@@ -160,11 +161,11 @@ class GraphPlugin:
         Returns a list of calendar events including subject, start time, end time, location, and attendees.
         """
     )
-    async def get_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[Optional[str], "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[Optional[str], "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
+    async def get_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[Optional[date], "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[Optional[date], "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
         self._log_function_call("get_calendar_events", user_id=user_id, start_date=start_date, end_date=end_date)
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
-        if start_date and not start_date.strip(): start_date = None
-        if end_date and not end_date.strip(): end_date = None
+        if start_date and not start_date: start_date = None
+        if end_date and not end_date: end_date = None
         try:
             return await graph_operations.get_calendar_events_by_user_id(user_id.strip(), start_date, end_date)
         except Exception as e:

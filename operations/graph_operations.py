@@ -304,7 +304,7 @@ class GraphOperations:
 
     # Calendar Operations
     # Get calendar events for a user by user ID with optional date range
-    async def get_calendar_events_by_user_id(self, user_id: str, start_date: str = None, end_date: str = None) -> DirectoryObject  | None:
+    async def get_calendar_events_by_user_id(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> DirectoryObject  | None:
         try:
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
@@ -336,10 +336,10 @@ class GraphOperations:
                     # Add date range filter if provided
                     filters = []
                     if start_date:
-                        filters.append(f"start/dateTime ge '{start_date}'")
+                        filters.append(f"start/dateTime ge '{start_date.isoformat()}'")
                     if end_date:
-                        filters.append(f"end/dateTime le '{end_date}'")
-                    
+                        filters.append(f"end/dateTime le '{end_date.isoformat()}'")
+
                     if filters:
                         events_query_params.filter = " and ".join(filters)
                     
