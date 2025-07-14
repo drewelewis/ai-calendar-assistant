@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime
 import os
 import asyncio
 from typing import List, Optional, Annotated
@@ -161,13 +161,38 @@ class GraphPlugin:
         Returns a list of calendar events including subject, start time, end time, location, and attendees.
         """
     )
-    async def get_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[Optional[date], "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[Optional[date], "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
+    async def get_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[str, "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[str, "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
         self._log_function_call("get_calendar_events", user_id=user_id, start_date=start_date, end_date=end_date)
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
-        if start_date and not start_date: start_date = None
-        if end_date and not end_date: end_date = None
+        
+        # Convert string dates to datetime objects if provided
+        start_datetime = None
+        end_datetime = None
+        
+        if start_date:
+            try:
+                # Try parsing ISO 8601 format with timezone
+                if start_date.endswith('Z'):
+                    start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                else:
+                    start_datetime = datetime.fromisoformat(start_date)
+            except ValueError as e:
+                print(f"Error parsing start_date '{start_date}': {e}")
+                start_datetime = None
+                
+        if end_date:
+            try:
+                # Try parsing ISO 8601 format with timezone
+                if end_date.endswith('Z'):
+                    end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                else:
+                    end_datetime = datetime.fromisoformat(end_date)
+            except ValueError as e:
+                print(f"Error parsing end_date '{end_date}': {e}")
+                end_datetime = None
+        
         try:
-            return await graph_operations.get_calendar_events_by_user_id(user_id.strip(), start_date, end_date)
+            return await graph_operations.get_calendar_events_by_user_id(user_id.strip(), start_datetime, end_datetime)
         except Exception as e:
             print(f"Error in get_calendar_events: {e}")
             return []
@@ -180,7 +205,7 @@ class GraphPlugin:
         Attendees should be email addresses.
         """
     )
-    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[Optional[str], "Optional location for the event"] = None, attendees: Annotated[Optional[List[str]], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[Optional[List[str]], "Optional list of optional attendee email addresses"] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
+    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
         self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end, 
                               location=location, attendees=attendees, optional_attendees=optional_attendees)
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")

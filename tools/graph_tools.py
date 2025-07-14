@@ -2,6 +2,7 @@ import os
 import asyncio
 import concurrent.futures
 import threading
+from datetime import datetime
 from typing import List, Optional, Type
 from langchain_core.callbacks import CallbackManagerForToolRun, AsyncCallbackManagerForToolRun
 from langchain_core.tools import BaseTool
@@ -48,8 +49,26 @@ def run_async_safely(async_func, *args, **kwargs):
             future = executor.submit(run_in_thread)
             return future.result()
     except RuntimeError:
-        # No event loop is running, we can use asyncio.run
+        # No event loop is running, safe to use asyncio.run
         return asyncio.run(async_func(*args, **kwargs))
+
+def convert_string_to_datetime(date_string: Optional[str]) -> Optional[datetime]:
+    """
+    Helper function to convert ISO 8601 date string to datetime object.
+    Returns None if input is None or conversion fails.
+    """
+    if not date_string:
+        return None
+    
+    try:
+        # Try parsing ISO 8601 format with timezone
+        if date_string.endswith('Z'):
+            return datetime.fromisoformat(date_string.replace('Z', '+00:00'))
+        else:
+            return datetime.fromisoformat(date_string)
+    except ValueError as e:
+        print(f"Error parsing date '{date_string}': {e}")
+        return None
 
 class GraphTools():
 
@@ -339,14 +358,20 @@ class GraphTools():
         def _run(self, user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[dict]:
             """Synchronous version"""
             try:
-                return run_async_safely(graph_operations.get_calendar_events_by_user_id, user_id, start_date, end_date)
+                # Convert string dates to datetime objects
+                start_datetime = convert_string_to_datetime(start_date)
+                end_datetime = convert_string_to_datetime(end_date)
+                return run_async_safely(graph_operations.get_calendar_events_by_user_id, user_id, start_datetime, end_datetime)
             except Exception as e:
                 print(f"Error in GetCalendarEvents._run: {e}")
                 return []
 
         async def _arun(self, user_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, run_manager: Optional[AsyncCallbackManagerForToolRun] = None) -> List[dict]:
             """Async version"""
-            return await graph_operations.get_calendar_events_by_user_id(user_id, start_date, end_date)
+            # Convert string dates to datetime objects
+            start_datetime = convert_string_to_datetime(start_date)
+            end_datetime = convert_string_to_datetime(end_date)
+            return await graph_operations.get_calendar_events_by_user_id(user_id, start_datetime, end_datetime)
 
     class CreateCalendarEvent(BaseTool):
         name: str = "CreateCalendarEvent"
