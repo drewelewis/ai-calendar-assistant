@@ -14,7 +14,7 @@ azure-identity==1.23.0
 msgraph-sdk
 msal
 requests
-psycopg2
+azure-cosmos==4.9.0
 
 
 

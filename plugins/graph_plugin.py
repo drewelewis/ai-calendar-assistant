@@ -7,11 +7,11 @@ from semantic_kernel.functions import kernel_function
 # Try to import the real GraphOperations, fallback to mock if it fails
 try:
     from operations.graph_operations import GraphOperations
-    print("✓ Using real Microsoft Graph Operations")
+    # print("✓ Using real Microsoft Graph Operations")
 except Exception as e:
-    print(f"⚠ Could not import real GraphOperations: {e}")
-    print("🎭 Falling back to mock GraphOperations for testing")
-    from operations.mock_graph_operations import GraphOperations
+    print(f"⚠ Could not import GraphOperations: {e}")
+    # print("🎭 Falling back to mock GraphOperations for testing")
+    # from operations.mock_graph_operations import GraphOperations
 
 graph_operations = GraphOperations(
     user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"],
@@ -28,17 +28,6 @@ class GraphPlugin:
         if self.debug:
             params_str = ", ".join([f"{k}={repr(v)}" for k, v in kwargs.items()])
             print(f"DEBUG: Calling kernel function '{function_name}' with parameters: {params_str}")
-
-    # Sample kernel functions
-    # @kernel_function(description="Provides a list of specials from the menu.")
-    # def get_specials(self) -> Annotated[str, "Returns the specials from the menu."]: return """
-    #     Special Soup: Clam Chowder
-    #     Special Salad: Cobb Salad
-    #     Special Drink: Chai Tea
-    #     """
-
-    # @kernel_function(description="Provides the price of the requested menu item.")
-    # def get_item_price(self, menu_item: Annotated[str, "The name of the menu item."]) -> Annotated[str, "Returns the price of the menu item."]: return "$9.99"
 
     @kernel_function(
         description="""

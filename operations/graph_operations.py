@@ -46,7 +46,7 @@ class GraphOperations:
         """Get or create the Graph client with lazy initialization."""
         if self.graph_client is None:
             try:
-                print("🔄 Initializing Microsoft Graph client...")
+                # print("🔄 Initializing Microsoft Graph client...")
                 
                 # Validate credentials when actually needed
                 if self.tenant_id is None:
@@ -61,10 +61,10 @@ class GraphOperations:
                 # Add chat.readAll for read access to all chats to scope
                 scope = ["https://graph.microsoft.com/.default"]
                 self.graph_client = GraphServiceClient(credential, scope)
-                print("✓ Microsoft Graph client initialized successfully!")
+                # print("✓ Microsoft Graph client initialized successfully!")
             except Exception as e:
                 print(f"❌ Failed to initialize Microsoft Graph client: {e}")
-                print("🔧 Please check your ENTRA_GRAPH_APPLICATION_* environment variables")
+                # print("🔧 Please check your ENTRA_GRAPH_APPLICATION_* environment variables")
                 raise
         return self.graph_client
     
@@ -279,7 +279,7 @@ class GraphOperations:
             # Add filter if provided
             if filter:
                 query_params.filter = filter
-                print(f"Applied filter: {filter}")
+                # print(f"Applied filter: {filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
             query_params.select = self.user_response_fields
