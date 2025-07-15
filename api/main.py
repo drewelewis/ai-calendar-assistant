@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from api.chat_completion import completion as api_chat_completion
 from api.chat_completion import chat as api_chat
 from models.openai_models import OpenAIModels
+from models.chat_models import ChatModels
 from ai.agent import Agent
 
 app = FastAPI()
@@ -27,7 +28,7 @@ async def chat(messages: OpenAIModels.Messages):
     return message
 
 @app.post("/agent_chat")
-async def agent_chat(message: str):
-    agent = Agent()
-    result = await agent.invoke(message)
+async def agent_chat(message: ChatModels.Message):
+    agent = Agent(session_id=message.session_id)
+    result = await agent.invoke(message.message)
     return result

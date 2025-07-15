@@ -23,8 +23,9 @@ from prompts.graph_prompts import prompts
 load_dotenv(override=True)
 
 class Agent:
-    def __init__(self):
+    def __init__(self, session_id: str = None):
         
+        self.session_id = session_id
         # 1. Load environment variables
         self.endpoint = os.getenv("OPENAI_ENDPOINT")
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -81,11 +82,9 @@ class Agent:
         )
 
     async def invoke(self, message: str):
-        session_id = os.getenv("CHAT_SESSION_ID")
-        
         # Create or hydrate thread based on CosmosDB availability
         if self.cosmos_manager:
-            thread = await self.cosmos_manager.create_hydrated_thread(self.kernel, session_id)
+            thread = await self.cosmos_manager.create_hydrated_thread(self.kernel, self.session_id)
         else:
             # Create a new empty thread if CosmosDB is not available
             from semantic_kernel.agents import ChatHistoryAgentThread
@@ -100,8 +99,8 @@ class Agent:
         # Save chat history if CosmosDB is available
         if self.cosmos_manager:
             try:
-                await self.cosmos_manager.save_chat_history(thread, session_id)
-                print(f"Chat history saved with session ID: {session_id}")
+                await self.cosmos_manager.save_chat_history(thread, self.session_id)
+                print(f"Chat history saved with session ID: {self.session_id}")
             except Exception as e:
                 print(f"Error saving chat history: {e}")
 

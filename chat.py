@@ -50,9 +50,6 @@ maintained in a ChatHistoryAgentThread object and persisted in Azure CosmosDB.
 # USER_INPUTS = [
 #     "Where did we leave off? Please summarize our previous conversation."
 # ]
-USER_INPUTS = [
-    "Can you help me get the execuitve team members?"
-]
 async def main():
     # Load environment variables
     load_dotenv(override=True)

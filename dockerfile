@@ -17,13 +17,14 @@ RUN apk add --no-cache \
 
 COPY ./ai /code/ai
 COPY ./api /code/api
+COPY ./identity /code/identity
 COPY ./models /code/models
 COPY ./operations /code/operations
+COPY ./plugins /code/plugins
 COPY ./prompts /code/prompts
-COPY ./tools /code/tools
-COPY ./utils /code/utils
 COPY ./storage /code/storage
-COPY ./identity /code/identity
+
+
 
 
 EXPOSE 8989
