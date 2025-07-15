@@ -16,6 +16,7 @@ msgraph-sdk
 msal
 requests
 azure-cosmos==4.9.0
+colorama==0.4.6
 
 
 
