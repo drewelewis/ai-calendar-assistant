@@ -35,23 +35,49 @@ class Agent:
         self.cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
         self.cosmos_container = os.getenv("COSMOS_CONTAINER", "ChatHistory")
         
-        # Validate required environment variables
-        if not all([self.endpoint, self.api_key, self.deployment_name, self.cosmos_endpoint, self.cosmos_database, self.cosmos_container]):
+        # Validate required OpenAI environment variables
+        if not all([self.endpoint, self.api_key, self.deployment_name]):
             raise ValueError(
-                "Missing required environment variables. Please ensure OPENAI_ENDPOINT, "
-                "OPENAI_API_KEY, OPENAI_MODEL_DEPLOYMENT_NAME, COSMOS_ENDPOINT, "
-                "COSMOS_DATABASE, and COSMOS_CONTAINER are set in the .env file."
+                "Missing required OpenAI environment variables. Please ensure OPENAI_ENDPOINT, "
+                "OPENAI_API_KEY, and OPENAI_MODEL_DEPLOYMENT_NAME are set in the .env file."
             )
 
-        try:
-            self.cosmos_manager = CosmosDBChatHistoryManager(
-                self.cosmos_endpoint, 
-                self.cosmos_database, 
-                self.cosmos_container
-            )
-        except Exception as e:
-            print(f"Warning: Failed to initialize CosmosDB with Azure Identity: {e}")
-            print("Chat history will not be persisted.")
+        # Initialize CosmosDB if endpoint is configured
+        if self.cosmos_endpoint:
+            try:
+                self.cosmos_manager = CosmosDBChatHistoryManager(
+                    self.cosmos_endpoint, 
+                    self.cosmos_database, 
+                    self.cosmos_container
+                )
+                print("✅ CosmosDB initialized successfully")
+            except Exception as e:
+                print(f"⚠ Warning: Failed to initialize CosmosDB: {e}")
+                
+                # Provide specific guidance based on error type
+                if "ManagedIdentityCredential" in str(e) or "No managed identity endpoint found" in str(e):
+                    print("� MANAGED IDENTITY ISSUE DETECTED:")
+                    print("   This appears to be a production managed identity configuration problem.")
+                    print("   📖 See '_production_managed_identity_setup.md' for detailed setup instructions.")
+                    print("")
+                    print("   Quick fixes to try:")
+                    print("   1. Ensure managed identity is enabled on your Azure resource")
+                    print("   2. Grant 'Cosmos DB Built-in Data Contributor' role to the managed identity")
+                    print("   3. Verify local authentication is disabled on CosmosDB")
+                elif "Request url is invalid" in str(e):
+                    print("🔗 CosmosDB URL issue - check your COSMOS_ENDPOINT format")
+                elif "insufficient privileges" in str(e).lower():
+                    print("🔒 Permissions issue - managed identity needs CosmosDB data access role")
+                else:
+                    print("💡 General troubleshooting:")
+                    print("   1. Check your COSMOS_ENDPOINT in .env file")
+                    print("   2. Verify Azure authentication (managed identity in production, CLI in dev)")
+                    print("   3. Ensure CosmosDB permissions are correctly configured")
+                
+                print("📝 Chat history will not be persisted until this is resolved.")
+                self.cosmos_manager = None
+        else:
+            print("ℹ COSMOS_ENDPOINT not configured. Chat history will not be persisted.")
             self.cosmos_manager = None
         
         # 2. Create the Kernel and register plugins
@@ -61,6 +87,7 @@ class Agent:
         # 3. Add the Microsoft Graph plugin with optional debug mode
         self.graph_debug = os.getenv("GRAPH_DEBUG", "false").lower() == "true"
         self.kernel.add_plugin(GraphPlugin(debug=self.graph_debug), plugin_name="graph")
+        # self.kernel.add_plugin(OpenTablePlugin(), plugin_name="open_table")
        
         # 4. Add Azure OpenAI service to the kernel
         self.kernel.add_service(AzureChatCompletion(
@@ -73,15 +100,17 @@ class Agent:
         self.settings = self.kernel.get_prompt_execution_settings_from_service_id(service_id=self.service_id)
         self.settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
 
-        # 5. Create the ChatCompletionAgent
+        # Create
         self.agent = ChatCompletionAgent(
             kernel=self.kernel,
             name="Agent",
-            instructions=prompts.master_prompt(),
+            instructions=prompts.master_prompt(self.session_id),
             arguments=KernelArguments(settings=self.settings),
         )
 
+
     async def invoke(self, message: str):
+
         # Create or hydrate thread based on CosmosDB availability
         if self.cosmos_manager:
             thread = await self.cosmos_manager.create_hydrated_thread(self.kernel, self.session_id)

@@ -4,14 +4,15 @@ import uuid
 
 from identity.azure_credentials import AzureCredentials
 from azure.cosmos import CosmosClient, PartitionKey
+from azure.core.exceptions import ClientAuthenticationError
 
 
 class CosmosDBChatHistoryManager:
-    """Manages chat history persistence with Azure Cosmos DB using Azure Identity."""
+    """Manages chat history persistence with Azure Cosmos DB using Azure Identity or connection key."""
     
     def __init__(self, endpoint, database_name, container_name, credential=None):
         """
-        Initialize the CosmosDB client using Azure Identity.
+        Initialize the CosmosDB client using Azure Identity or connection key as fallback.
         
         Args:
             endpoint: CosmosDB endpoint URL
@@ -19,17 +20,90 @@ class CosmosDBChatHistoryManager:
             container_name: Name of the container
             credential: Optional Azure credential. If None, uses get_azure_credential()
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        self.client = None
+        
+        # Try Azure Identity first if no credential provided
         if credential is None:
-            # Use our custom credential getter with fallback options
-            credential = AzureCredentials.get_credential()
-
-        self.client = CosmosClient(endpoint, credential=credential)
-        self.database = self.client.create_database_if_not_exists(id=database_name)
-        self.container = self.database.create_container_if_not_exists(
-            id=container_name,
-            partition_key=PartitionKey(path="/sessionId"),
-            offer_throughput=400  # Minimum throughput
-        )
+            try:
+                logger.info("🔑 Attempting Azure Identity authentication for CosmosDB...")
+                logger.info(f"🌐 Connecting to CosmosDB URL: {endpoint}")
+                print(f"🌐 Connecting to CosmosDB URL: {endpoint}")  # Also print to console
+                
+                credential = AzureCredentials.get_credential()
+                self.client = CosmosClient(endpoint, credential=credential)
+                logger.info("✅ Connected to CosmosDB using Azure Identity")
+                
+                # Test the connection by attempting to read databases
+                try:
+                    list(self.client.list_databases())
+                    logger.info("✅ CosmosDB connection verified successfully")
+                except Exception as test_error:
+                    logger.error(f"❌ CosmosDB connection test failed: {test_error}")
+                    raise test_error
+                    
+            except Exception as e:
+                logger.warning(f"⚠ Azure Identity authentication failed: {e}")
+                print(f"⚠ Azure Identity failed for URL: {endpoint}")  # Also print to console
+                
+                # Check if this is a managed identity issue in production
+                if "ManagedIdentityCredential" in str(e) or "No managed identity endpoint found" in str(e):
+                    logger.error("🚨 Managed Identity authentication failed - this usually indicates:")
+                    logger.error("   1. Managed Identity is not enabled on this Azure resource")
+                    logger.error("   2. Managed Identity doesn't have proper permissions on CosmosDB")
+                    logger.error("   3. Running outside of Azure environment without proper configuration")
+                
+                # Fall back to connection key if available
+                cosmos_key = os.getenv("COSMOS_KEY")
+                if cosmos_key:
+                    try:
+                        logger.info("🔄 Falling back to connection key authentication...")
+                        logger.info(f"🌐 Retry connecting to CosmosDB URL: {endpoint}")
+                        print(f"🔄 Retrying with connection key for URL: {endpoint}")  # Also print to console
+                        
+                        self.client = CosmosClient(endpoint, cosmos_key)
+                        logger.info("✅ Connected to CosmosDB using connection key")
+                        
+                        # Test the connection
+                        list(self.client.list_databases())
+                        logger.info("✅ CosmosDB connection verified with connection key")
+                        
+                    except Exception as key_error:
+                        logger.error(f"❌ Connection key authentication also failed: {key_error}")
+                        print(f"❌ Connection key also failed for URL: {endpoint}")  # Also print to console
+                        raise ClientAuthenticationError(
+                            f"Failed to connect with both Azure Identity and connection key. "
+                            f"Azure Identity error: {e}. Connection key error: {key_error}"
+                        )
+                else:
+                    logger.error("❌ No COSMOS_KEY environment variable found for fallback")
+                    raise ClientAuthenticationError(
+                        f"Azure Identity failed and no connection key available. "
+                        f"Error: {e}. Please either:\n"
+                        f"1. Fix managed identity configuration, or\n"
+                        f"2. Set COSMOS_KEY environment variable"
+                    )
+        else:
+            # Use provided credential
+            logger.info(f"🌐 Connecting to CosmosDB with provided credential: {endpoint}")
+            print(f"🌐 Connecting to CosmosDB with provided credential: {endpoint}")  # Also print to console
+            self.client = CosmosClient(endpoint, credential=credential)
+            logger.info("✅ Connected to CosmosDB using provided credential")
+        
+        # Initialize database and container
+        try:
+            self.database = self.client.create_database_if_not_exists(id=database_name)
+            self.container = self.database.create_container_if_not_exists(
+                id=container_name,
+                partition_key=PartitionKey(path="/sessionId"),
+                offer_throughput=400  # Minimum throughput
+            )
+            logger.info(f"✅ CosmosDB database '{database_name}' and container '{container_name}' ready")
+        except Exception as setup_error:
+            logger.error(f"❌ Failed to setup CosmosDB database/container: {setup_error}")
+            raise
     
     async def save_chat_history(self, thread, session_id=None):
         """Save chat history from a thread to Cosmos DB."""
