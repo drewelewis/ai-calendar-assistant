@@ -3,7 +3,7 @@ from datetime import datetime
 
 class M365Prompts:
     """
-    A class to store and manage all prompts used in the AI knowledge base.
+    A class to store and manage all prompts used in the calendar assistant.
     """
     def __init__(self):
         # Example prompts, add or modify as needed
