@@ -1,7 +1,8 @@
 import re
 from fastapi import FastAPI
 
-from api import chat_completion
+from api.chat_completion import completion as api_chat_completion
+from api.chat_completion import chat as api_chat
 from models.openai_models import OpenAIModels
 from ai.agent import Agent
 
@@ -17,16 +18,16 @@ async def health_check():
 
 @app.get("/completion")
 async def completion(query: str = "how are you?"):
-    response=chat_completion.completion(query)
+    response=api_chat_completion(query)
     return response
 
 @app.post("/chat")
 async def chat(messages: OpenAIModels.Messages):
-    message=chat_completion.chat(messages.messages)
+    message=api_chat(messages.messages)
     return message
 
 @app.post("/agent_chat")
-async def agent_chat(messages: OpenAIModels.Messages):
+async def agent_chat(message: str):
     agent = Agent()
-    result = agent.invoke_graph(messages.messages)
+    result = await agent.invoke(message)
     return result
