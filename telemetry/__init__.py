@@ -19,6 +19,20 @@ from .decorators import (
     log_with_trace
 )
 
+from .token_tracking import (
+    track_openai_tokens,
+    add_token_span_attributes,
+    record_token_metrics,
+    extract_token_usage,
+    calculate_token_cost
+)
+
+from .semantic_kernel_instrumentation import (
+    instrument_semantic_kernel,
+    uninstrument_semantic_kernel,
+    is_semantic_kernel_instrumented
+)
+
 __all__ = [
     'TelemetryConfig',
     'initialize_telemetry',

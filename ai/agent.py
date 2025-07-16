@@ -3,6 +3,7 @@ import os
 import asyncio
 import json
 import uuid
+import logging
 from typing import Annotated
 import datetime
 import colorama
@@ -23,6 +24,7 @@ from prompts.graph_prompts import prompts
 # Import telemetry components
 from telemetry.config import initialize_telemetry, get_telemetry
 from telemetry.decorators import trace_async_method, measure_performance, TelemetryContext
+from telemetry.token_tracking import add_token_span_attributes, record_token_metrics
  
 load_dotenv(override=True)
 
@@ -253,13 +255,33 @@ class Agent:
                 )
                 add_message_to_thread(instruction_message, "instruction message")
 
-            response = await self.agent.get_response(
-                messages=message,
-                thread=thread
-            )
-            thread = response.thread
-            
-            self.logger.info(f"Generated response for session: {self.session_id}")
+            # Track the OpenAI API call with token information
+            with TelemetryContext(operation="openai_chat_completion", model=self.deployment_name):
+                response = await self.agent.get_response(
+                    messages=message,
+                    thread=thread
+                )
+                thread = response.thread
+                
+                # Extract token usage from response if available
+                try:
+                    # Try to access the underlying OpenAI response for token information
+                    if hasattr(response, '_raw_response'):
+                        raw_response = response._raw_response
+                        add_token_span_attributes(raw_response, self.deployment_name)
+                        record_token_metrics(raw_response, self.deployment_name, "chat_completion")
+                    elif hasattr(response, 'usage'):
+                        # If usage information is directly available
+                        add_token_span_attributes(response, self.deployment_name)
+                        record_token_metrics(response, self.deployment_name, "chat_completion")
+                    else:
+                        # If we can't find token info, at least log that we tried
+                        self.logger.debug("Token usage information not found in response")
+                        
+                except Exception as e:
+                    self.logger.debug(f"Could not extract token usage: {e}")
+                
+                self.logger.info(f"Generated response for session: {self.session_id}")
         
         # Save chat history if CosmosDB is available
         if self.cosmos_manager:

@@ -89,6 +89,14 @@ class TelemetryConfig:
             # Instrument logging
             LoggingInstrumentor().instrument(set_logging_format=True)
             
+            # Instrument Semantic Kernel OpenAI calls for token tracking
+            try:
+                from .semantic_kernel_instrumentation import instrument_semantic_kernel
+                instrument_semantic_kernel()
+                print("✅ Semantic Kernel OpenAI instrumentation enabled")
+            except Exception as e:
+                print(f"⚠ Warning: Could not instrument Semantic Kernel: {e}")
+            
             print("✅ Auto-instrumentation configured")
             
         except Exception as e:
@@ -147,6 +155,22 @@ class TelemetryConfig:
                 name="openai_api_calls_total",
                 description="Total number of OpenAI API calls",
                 unit="1"
+            ),
+            # Token tracking metrics
+            'openai_tokens_total': meter.create_counter(
+                name="openai_tokens_total",
+                description="Total number of tokens consumed by OpenAI API calls",
+                unit="tokens"
+            ),
+            'openai_token_cost_total': meter.create_counter(
+                name="openai_token_cost_total",
+                description="Total estimated cost of OpenAI API calls",
+                unit="usd_cents"
+            ),
+            'openai_request_duration': meter.create_histogram(
+                name="openai_request_duration_ms",
+                description="Duration of OpenAI API requests",
+                unit="ms"
             )
         }
 
