@@ -1,31 +1,82 @@
-fastapi[all]
+# ===================================================================
+# AI Calendar Assistant - Production Requirements (Version Locked)
+# Last Updated: 2025-07-16
+# Python Version: 3.13.5
+# ===================================================================
+
+# Core Web Framework
+fastapi==0.116.1
 uvicorn==0.35.0
-typing==3.7.4.3
+starlette==0.47.1
 
-openai==1.95.1
+# HTTP and Async Support
 httpx==0.27.2
+httpcore==1.0.9
+h11==0.16.0
+anyio==4.9.0
+sniffio==1.3.1
 
-# Semantic Kernel requirements
-semantic-kernel
-python-dotenv
+# OpenAI and AI Libraries
+openai==1.95.1
+semantic-kernel==1.34.0
 
-asyncio
+# Azure SDK and Authentication
 azure-identity==1.23.0
 azure-core==1.32.0
-msgraph-sdk
-msal
-requests
 azure-cosmos==4.9.0
-colorama==0.4.6
+azure-storage-blob==12.25.1
+msal==1.32.3
+msal-extensions==1.3.1
 
-# OpenTelemetry packages for observability
+# Microsoft Graph SDK
+msgraph-sdk==1.37.0
+msgraph-core==1.3.5
+microsoft-kiota-abstractions==1.9.4
+microsoft-kiota-authentication-azure==1.9.4
+microsoft-kiota-http==1.9.4
+microsoft-kiota-serialization-form==1.9.4
+microsoft-kiota-serialization-json==1.9.4
+microsoft-kiota-serialization-multipart==1.9.4
+microsoft-kiota-serialization-text==1.9.4
+
+# OpenTelemetry (Observability Stack)
 azure-monitor-opentelemetry==1.6.0
+azure-monitor-opentelemetry-exporter==1.0.0b39
 opentelemetry-api==1.31.0
 opentelemetry-sdk==1.31.0
-opentelemetry-instrumentation-requests
-opentelemetry-instrumentation-httpx
-opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-logging
+opentelemetry-instrumentation==0.52b0
+opentelemetry-instrumentation-requests==0.52b0
+opentelemetry-instrumentation-httpx==0.52b0
+opentelemetry-instrumentation-fastapi==0.52b0
+opentelemetry-instrumentation-logging==0.52b0
+opentelemetry-semantic-conventions==0.52b0
+opentelemetry-util-http==0.52b0
+
+# Configuration and Environment
+python-dotenv==1.1.1
+pydantic==2.11.7
+pydantic-core==2.33.2
+pydantic-settings==2.10.1
+
+# Utilities and Support Libraries
+requests==2.32.4
+colorama==0.4.6
+click==8.2.1
+setuptools==80.9.0
+packaging==25.0
+certifi==2025.7.9
+charset-normalizer==3.4.2
+urllib3==2.5.0
+idna==3.10
+typing-extensions==4.14.1
+
+# Development and Runtime Dependencies
+jiter==0.10.0
+annotated-types==0.7.0
+attrs==25.3.0
+deprecation==2.1.0
+six==1.17.0
+wrapt==1.17.2
 
 
 

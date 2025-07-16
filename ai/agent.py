@@ -87,16 +87,22 @@ class Agent:
                     )
                     self.logger.info("✅ CosmosDB initialized successfully")
                     
-                    # Record successful initialization
-                    if 'cosmosdb_operations_total' in self.metrics:
-                        self.metrics['cosmosdb_operations_total'].add(1, {"operation": "init", "status": "success"})
+                    # Record successful initialization - wrap in try-catch
+                    try:
+                        if 'cosmosdb_operations_total' in self.metrics:
+                            self.metrics['cosmosdb_operations_total'].add(1, {"operation": "init", "status": "success"})
+                    except Exception as e:
+                        self.logger.warning(f"Failed to record CosmosDB init success metric: {e}")
                         
             except Exception as e:
                 self.logger.error(f"⚠ Warning: Failed to initialize CosmosDB: {e}")
                 
-                # Record failed initialization
-                if 'cosmosdb_operations_total' in self.metrics:
-                    self.metrics['cosmosdb_operations_total'].add(1, {"operation": "init", "status": "error"})
+                # Record failed initialization - wrap in try-catch
+                try:
+                    if 'cosmosdb_operations_total' in self.metrics:
+                        self.metrics['cosmosdb_operations_total'].add(1, {"operation": "init", "status": "error"})
+                except Exception as metric_error:
+                    self.logger.warning(f"Failed to record CosmosDB init error metric: {metric_error}")
                 
                 # Provide specific guidance based on error type
                 if "ManagedIdentityCredential" in str(e) or "No managed identity endpoint found" in str(e):
@@ -164,19 +170,25 @@ class Agent:
     @measure_performance("chat_request")
     async def invoke(self, message: str):
         
-        # Record chat request metric
-        if 'chat_requests_total' in self.metrics:
-            self.metrics['chat_requests_total'].add(1, {"session_id": self.session_id})
+        # Record chat request metric - wrap in try-catch for graceful failure
+        try:
+            if 'chat_requests_total' in self.metrics:
+                self.metrics['chat_requests_total'].add(1, {"session_id": self.session_id})
+        except Exception as e:
+            self.logger.warning(f"Failed to record chat request metric: {e}")
         
         # Log the incoming request
         self.logger.info(f"Processing chat request for session: {self.session_id}")
         
-        # Console output for chat request
-        console_telemetry_event("chat_request", {
-            "session_id": self.session_id,
-            "message_length": len(message),
-            "has_cosmosdb": self.cosmos_manager is not None
-        }, "agent")
+        # Console output for chat request - wrap in try-catch
+        try:
+            console_telemetry_event("chat_request", {
+                "session_id": self.session_id,
+                "message_length": len(message),
+                "has_cosmosdb": self.cosmos_manager is not None
+            }, "agent")
+        except Exception as e:
+            self.logger.warning(f"Failed to record console telemetry event: {e}")
         
         # Create or hydrate thread based on CosmosDB availability
         with TelemetryContext(operation="thread_creation", session_id=self.session_id):
@@ -191,13 +203,16 @@ class Agent:
         
         # Process the request with the agent
         with TelemetryContext(operation="agent_response", message_length=len(message)):
-            # Record OpenAI API call
-            if 'openai_api_calls_total' in self.metrics:
-                self.metrics['openai_api_calls_total'].add(1, {"model": self.deployment_name})
+            # Record OpenAI API call - wrap in try-catch for graceful failure
+            try:
+                if 'openai_api_calls_total' in self.metrics:
+                    self.metrics['openai_api_calls_total'].add(1, {"model": self.deployment_name})
+            except Exception as e:
+                self.logger.warning(f"Failed to record OpenAI API call metric: {e}")
             
             
             # Check if we need to add initial messages (system and instructions)
-            needs_initial_messages = True
+            has_system_message = False
             
             try:
                 # Get messages from the thread using the proper API
@@ -217,18 +232,23 @@ class Agent:
                     else:
                         messages = thread.messages
                 
-                # Check if we have any messages at all - if so, assume initial messages are already added
-                if len(messages) > 0:
-                    needs_initial_messages = False
-                    self.logger.debug(f"Found {len(messages)} existing messages in thread - skipping initial messages")
+                # Evaluate messages list to determine if we have a system message
+                # look at messages for a message with the role of SYSTEM
+
+                if any(msg.role == AuthorRole.SYSTEM for msg in messages):
+                    self.logger.debug("Found existing system message in thread")
+                    has_system_message = True
+                else:
+                    self.logger.debug("No existing system message found in thread")
+                    has_system_message = False
                 
             except Exception as e:
                 self.logger.debug(f"Could not check existing messages: {e}")
                 # Default to adding messages if we can't check
-                needs_initial_messages = True
+                has_system_message = False
 
             # Add system message and instructions if needed
-            if needs_initial_messages:
+            if has_system_message== False:
                 def add_message_to_thread(message, message_type):
                     """Helper function to add a message to the thread using available methods"""
                     try:
@@ -256,7 +276,7 @@ class Agent:
                 )
                 add_message_to_thread(system_message, "system message")
 
-                # Add instruction message
+                # Add instruction message with the system message
                 instruction_message = ChatMessageContent(
                     role=AuthorRole.USER, 
                     content=prompts.instructions(self.session_id)
@@ -265,11 +285,14 @@ class Agent:
 
             # Track the OpenAI API call with token information
             with TelemetryContext(operation="openai_chat_completion", model=self.deployment_name):
-                # Console output for OpenAI call start
-                console_telemetry_event("openai_call", {
-                    "model": self.deployment_name,
-                    "operation": "chat_completion"
-                }, "agent")
+                # Console output for OpenAI call start - wrap in try-catch
+                try:
+                    console_telemetry_event("openai_call", {
+                        "model": self.deployment_name,
+                        "operation": "chat_completion"
+                    }, "agent")
+                except Exception as e:
+                    self.logger.warning(f"Failed to record console telemetry for OpenAI call: {e}")
                 
                 response = await self.agent.get_response(
                     messages=message,
@@ -277,7 +300,7 @@ class Agent:
                 )
                 thread = response.thread
                 
-                # Extract token usage from response if available
+                # Extract token usage from response if available - wrap in try-catch
                 try:
                     # Try to access the underlying OpenAI response for token information
                     if hasattr(response, '_raw_response'):
@@ -293,7 +316,7 @@ class Agent:
                         self.logger.debug("Token usage information not found in response")
                         
                 except Exception as e:
-                    self.logger.debug(f"Could not extract token usage: {e}")
+                    self.logger.warning(f"Could not extract token usage (operation continues): {e}")
                 
                 self.logger.info(f"Generated response for session: {self.session_id}")
         
@@ -304,16 +327,22 @@ class Agent:
                     await self.cosmos_manager.save_chat_history(thread, self.session_id)
                     self.logger.info(f"Chat history saved with session ID: {self.session_id}")
                     
-                    # Record successful save
-                    if 'cosmosdb_operations_total' in self.metrics:
-                        self.metrics['cosmosdb_operations_total'].add(1, {"operation": "save", "status": "success"})
+                    # Record successful save - wrap in try-catch
+                    try:
+                        if 'cosmosdb_operations_total' in self.metrics:
+                            self.metrics['cosmosdb_operations_total'].add(1, {"operation": "save", "status": "success"})
+                    except Exception as e:
+                        self.logger.warning(f"Failed to record CosmosDB save success metric: {e}")
                         
             except Exception as e:
                 self.logger.error(f"Error saving chat history: {e}")
                 
-                # Record failed save
-                if 'cosmosdb_operations_total' in self.metrics:
-                    self.metrics['cosmosdb_operations_total'].add(1, {"operation": "save", "status": "error"})
+                # Record failed save - wrap in try-catch
+                try:
+                    if 'cosmosdb_operations_total' in self.metrics:
+                        self.metrics['cosmosdb_operations_total'].add(1, {"operation": "save", "status": "error"})
+                except Exception as metric_error:
+                    self.logger.warning(f"Failed to record CosmosDB save error metric: {metric_error}")
 
         return response.message.content
 

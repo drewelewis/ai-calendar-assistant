@@ -1,0 +1,23 @@
+# ===================================================================
+# AI Calendar Assistant - Development Requirements
+# These are additional packages needed for development/testing
+# Install with: pip install -r requirements-dev.txt
+# ===================================================================
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+
+# Code Quality
+black==25.1.0
+flake8==7.1.1
+mypy==1.14.1
+
+# Development Tools
+ipython==8.35.0
+jupyter==1.1.1
+
+# Documentation
+mkdocs==1.7.3
+mkdocs-material==9.6.7

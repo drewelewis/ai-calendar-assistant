@@ -13,6 +13,41 @@ from .token_tracking import extract_token_usage, calculate_token_cost, add_token
 from .config import get_tracer, get_meter, get_logger
 
 
+def _extract_token_usage(usage) -> Dict[str, int]:
+    """
+    Safely extract token usage from either dictionary or object format.
+    Handles both CompletionUsage objects and dictionary formats gracefully.
+    """
+    try:
+        # Initialize default values
+        default_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        
+        if usage is None:
+            return default_usage
+        
+        # Handle dictionary format
+        if isinstance(usage, dict):
+            return {
+                "prompt_tokens": usage.get('prompt_tokens', 0),
+                "completion_tokens": usage.get('completion_tokens', 0),
+                "total_tokens": usage.get('total_tokens', 0)
+            }
+        
+        # Handle object format (like CompletionUsage)
+        return {
+            "prompt_tokens": getattr(usage, 'prompt_tokens', 0),
+            "completion_tokens": getattr(usage, 'completion_tokens', 0),
+            "total_tokens": getattr(usage, 'total_tokens', 0)
+        }
+        
+    except Exception as e:
+        # Log the error but don't let telemetry break the application
+        logger = get_logger()
+        if logger:
+            logger.warning(f"Failed to extract token usage safely: {e}")
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+
 class SemanticKernelInstrumentation:
     """
     Instrumentation for Semantic Kernel OpenAI service calls.
@@ -126,90 +161,102 @@ class SemanticKernelInstrumentation:
                     result = await original_method(self, *args, **kwargs)
                     duration_ms = (time.time() - start_time) * 1000
                     
-                    # Try to extract token usage from the result
+                    # Try to extract token usage from the result - wrap in try-catch for graceful failure
                     token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                     
-                    # SK usually returns a list of ChatMessageContent objects
-                    if isinstance(result, list) and len(result) > 0:
-                        first_result = result[0]
-                        
-                        # Check for metadata containing usage information
-                        if hasattr(first_result, 'metadata') and first_result.metadata:
-                            metadata = first_result.metadata
+                    try:
+                        # SK usually returns a list of ChatMessageContent objects
+                        if isinstance(result, list) and len(result) > 0:
+                            first_result = result[0]
                             
-                            # Look for usage information in metadata
-                            if 'usage' in metadata:
-                                usage = metadata['usage']
-                                token_usage = {
-                                    "prompt_tokens": usage.get('prompt_tokens', 0),
-                                    "completion_tokens": usage.get('completion_tokens', 0),
-                                    "total_tokens": usage.get('total_tokens', 0)
-                                }
-                            elif 'token_usage' in metadata:
-                                usage = metadata['token_usage']
-                                token_usage = {
-                                    "prompt_tokens": usage.get('prompt_tokens', 0),
-                                    "completion_tokens": usage.get('completion_tokens', 0),
-                                    "total_tokens": usage.get('total_tokens', 0)
-                                }
+                            # Check for metadata containing usage information
+                            if hasattr(first_result, 'metadata') and first_result.metadata:
+                                metadata = first_result.metadata
+                                
+                                # Look for usage information in metadata
+                                if 'usage' in metadata:
+                                    usage = metadata['usage']
+                                    token_usage = _extract_token_usage(usage)
+                                elif 'token_usage' in metadata:
+                                    usage = metadata['token_usage']
+                                    token_usage = _extract_token_usage(usage)
+                            
+                            # Also check if the result has usage information directly
+                            if hasattr(first_result, 'usage') and first_result.usage:
+                                usage = first_result.usage
+                                token_usage = _extract_token_usage(usage)
                         
-                        # Also check if the result has usage information directly
-                        if hasattr(first_result, 'usage') and first_result.usage:
-                            usage = first_result.usage
-                            token_usage = {
-                                "prompt_tokens": getattr(usage, 'prompt_tokens', 0),
-                                "completion_tokens": getattr(usage, 'completion_tokens', 0),
-                                "total_tokens": getattr(usage, 'total_tokens', 0)
-                            }
-                    
-                    # Add token information to span
-                    span.set_attribute("openai.tokens.prompt", token_usage["prompt_tokens"])
-                    span.set_attribute("openai.tokens.completion", token_usage["completion_tokens"])
-                    span.set_attribute("openai.tokens.total", token_usage["total_tokens"])
-                    span.set_attribute("openai.duration_ms", duration_ms)
-                    
-                    # Calculate estimated cost
-                    estimated_cost = calculate_token_cost(
-                        model_name,
-                        token_usage["prompt_tokens"],
-                        token_usage["completion_tokens"]
-                    )
-                    span.set_attribute("openai.cost.estimated_usd", estimated_cost)
-                    span.set_attribute("openai.cost.estimated_cents", estimated_cost * 100)
-                    
-                    # Record aggregated metrics
-                    if meter:
-                        attributes = {
-                            "model": model_name,
-                            "operation": "chat_completion",
-                            "service": "semantic_kernel",
-                            "status": "success"
-                        }
+                        # Add token information to span
+                        span.set_attribute("openai.tokens.prompt", token_usage["prompt_tokens"])
+                        span.set_attribute("openai.tokens.completion", token_usage["completion_tokens"])
+                        span.set_attribute("openai.tokens.total", token_usage["total_tokens"])
+                        span.set_attribute("openai.duration_ms", duration_ms)
                         
-                        # Token usage metrics
-                        token_counter = meter.create_counter("openai_tokens_total", "Total tokens used", "tokens")
-                        token_counter.add(token_usage["total_tokens"], {**attributes, "token_type": "total"})
-                        token_counter.add(token_usage["prompt_tokens"], {**attributes, "token_type": "prompt"})
-                        token_counter.add(token_usage["completion_tokens"], {**attributes, "token_type": "completion"})
-                        
-                        # Cost metrics (in cents for better precision)
-                        cost_counter = meter.create_counter("openai_token_cost_total", "Total estimated cost", "usd_cents")
-                        cost_counter.add(estimated_cost * 100, attributes)
-                        
-                        # Duration metrics
-                        duration_histogram = meter.create_histogram("openai_request_duration_ms", "Request duration", "ms")
-                        duration_histogram.record(duration_ms, attributes)
-                    
-                    # Log token usage
-                    if logger and token_usage["total_tokens"] > 0:
-                        logger.info(
-                            f"SK OpenAI API call completed - Model: {model_name}, "
-                            f"Tokens: {token_usage['total_tokens']} "
-                            f"(prompt: {token_usage['prompt_tokens']}, "
-                            f"completion: {token_usage['completion_tokens']}), "
-                            f"Cost: ${estimated_cost:.4f}, "
-                            f"Duration: {duration_ms:.2f}ms"
+                        # Calculate estimated cost
+                        estimated_cost = calculate_token_cost(
+                            model_name,
+                            token_usage["prompt_tokens"],
+                            token_usage["completion_tokens"]
                         )
+                        span.set_attribute("openai.cost.estimated_usd", estimated_cost)
+                        span.set_attribute("openai.cost.estimated_cents", estimated_cost * 100)
+                        
+                    except Exception as telemetry_error:
+                        # Log telemetry extraction error but don't fail the operation
+                        if logger:
+                            logger.warning(f"Failed to extract telemetry data (operation continues): {telemetry_error}")
+                        # Set minimal telemetry to show operation completed
+                        span.set_attribute("openai.duration_ms", duration_ms)
+                        span.set_attribute("telemetry.extraction_failed", True)
+                    
+                    # Record aggregated metrics - also wrap in try-catch
+                    try:
+                        if meter:
+                            attributes = {
+                                "model": model_name,
+                                "operation": "chat_completion",
+                                "service": "semantic_kernel",
+                                "status": "success"
+                            }
+                            
+                            # Token usage metrics
+                            token_counter = meter.create_counter("openai_tokens_total", "Total tokens used", "tokens")
+                            token_counter.add(token_usage["total_tokens"], {**attributes, "token_type": "total"})
+                            token_counter.add(token_usage["prompt_tokens"], {**attributes, "token_type": "prompt"})
+                            token_counter.add(token_usage["completion_tokens"], {**attributes, "token_type": "completion"})
+                            
+                            # Cost metrics (in cents for better precision)
+                            cost_counter = meter.create_counter("openai_token_cost_total", "Total estimated cost", "usd_cents")
+                            estimated_cost = calculate_token_cost(
+                                model_name,
+                                token_usage["prompt_tokens"],
+                                token_usage["completion_tokens"]
+                            )
+                            cost_counter.add(estimated_cost * 100, attributes)
+                            
+                            # Duration metrics
+                            duration_histogram = meter.create_histogram("openai_request_duration_ms", "Request duration", "ms")
+                            duration_histogram.record(duration_ms, attributes)
+                        
+                        # Log token usage
+                        if logger and token_usage["total_tokens"] > 0:
+                            estimated_cost = calculate_token_cost(
+                                model_name,
+                                token_usage["prompt_tokens"],
+                                token_usage["completion_tokens"]
+                            )
+                            logger.info(
+                                f"SK OpenAI API call completed - Model: {model_name}, "
+                                f"Tokens: {token_usage['total_tokens']} "
+                                f"(prompt: {token_usage['prompt_tokens']}, "
+                                f"completion: {token_usage['completion_tokens']}), "
+                                f"Cost: ${estimated_cost:.4f}, "
+                                f"Duration: {duration_ms:.2f}ms"
+                            )
+                    except Exception as metrics_error:
+                        # Log metrics error but don't fail the operation
+                        if logger:
+                            logger.warning(f"Failed to record metrics (operation continues): {metrics_error}")
                     
                     span.set_status(Status(StatusCode.OK))
                     return result
@@ -217,22 +264,32 @@ class SemanticKernelInstrumentation:
                 except Exception as e:
                     duration_ms = (time.time() - start_time) * 1000
                     
-                    # Record error metrics
-                    if meter:
-                        attributes = {
-                            "model": model_name,
-                            "operation": "chat_completion",
-                            "service": "semantic_kernel",
-                            "status": "error"
-                        }
-                        duration_histogram = meter.create_histogram("openai_request_duration_ms", "Request duration", "ms")
-                        duration_histogram.record(duration_ms, attributes)
+                    # Record error metrics - wrap in try-catch
+                    try:
+                        if meter:
+                            attributes = {
+                                "model": model_name,
+                                "operation": "chat_completion",
+                                "service": "semantic_kernel",
+                                "status": "error"
+                            }
+                            duration_histogram = meter.create_histogram("openai_request_duration_ms", "Request duration", "ms")
+                            duration_histogram.record(duration_ms, attributes)
+                    except Exception as metrics_error:
+                        # Log metrics error but don't fail the operation
+                        if logger:
+                            logger.warning(f"Failed to record error metrics: {metrics_error}")
                     
-                    # Add error information to span
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
-                    span.set_attribute("error.type", type(e).__name__)
-                    span.set_attribute("error.message", str(e))
-                    span.set_attribute("openai.duration_ms", duration_ms)
+                    # Add error information to span - wrap in try-catch
+                    try:
+                        span.set_status(Status(StatusCode.ERROR, str(e)))
+                        span.set_attribute("error.type", type(e).__name__)
+                        span.set_attribute("error.message", str(e))
+                        span.set_attribute("openai.duration_ms", duration_ms)
+                    except Exception as span_error:
+                        # Log span error but don't fail the operation
+                        if logger:
+                            logger.warning(f"Failed to set span attributes: {span_error}")
                     
                     if logger:
                         logger.error(f"SK OpenAI API call failed after {duration_ms:.2f}ms: {e}")

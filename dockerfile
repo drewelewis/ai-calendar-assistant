@@ -1,19 +1,24 @@
-FROM python:3.13.5-alpine
+FROM python:3.12.8-alpine
 
 WORKDIR /code
 
-COPY ./requirements.txt /code/requirements.txt
-COPY ./main.py /code/main.py
-
-
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
-
+# Install system dependencies first (required for building Python packages)
 RUN apk add --no-cache \
+    gcc \
+    g++ \
+    python3-dev \
     build-base \
     linux-headers \
     libffi-dev \
     openssl-dev \
-    musl-dev 
+    musl-dev
+
+COPY ./requirements.txt /code/requirements.txt
+COPY ./main.py /code/main.py
+
+# Install setuptools explicitly for Python 3.13 compatibility
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt 
 
 COPY ./ai /code/ai
 COPY ./api /code/api

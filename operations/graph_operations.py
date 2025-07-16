@@ -71,6 +71,75 @@ class GraphOperations:
     # Get Current Date and Time
     def get_current_datetime(self) -> str:
         return datetime.now().isoformat()
+    
+    # Helper method to validate if a user has a valid mailbox for calendar operations
+    async def validate_user_mailbox(self, user_id: str) -> dict:
+        """
+        Validate if a user has a valid mailbox for calendar operations.
+        
+        Args:
+            user_id (str): The ID of the user to validate
+            
+        Returns:
+            dict: Validation result with 'valid', 'message', and 'user_info' keys
+        """
+        try:
+            # First check if user exists and get their properties
+            user = await self.get_user_by_user_id(user_id)
+            
+            if not user:
+                return {
+                    'valid': False,
+                    'message': f'User {user_id} not found in the directory',
+                    'user_info': None
+                }
+            
+            # Check if user has mail property (indicates Exchange mailbox)
+            if not hasattr(user, 'mail') or not user.mail:
+                return {
+                    'valid': False,
+                    'message': f'User {user.display_name} ({user_id}) does not have an Exchange mailbox assigned',
+                    'user_info': user
+                }
+            
+            # Check if user account is enabled
+            if hasattr(user, 'account_enabled') and not user.account_enabled:
+                return {
+                    'valid': False,
+                    'message': f'User {user.display_name} ({user_id}) account is disabled',
+                    'user_info': user
+                }
+            
+            # Try a simple mailbox access test by getting mailbox settings
+            try:
+                await self._get_client().users.by_user_id(user_id).mailbox_settings.get()
+                return {
+                    'valid': True,
+                    'message': f'User {user.display_name} ({user_id}) has a valid mailbox',
+                    'user_info': user
+                }
+            except Exception as mailbox_error:
+                # If we can't access mailbox settings, the mailbox might not be enabled for REST API
+                if "MailboxNotEnabledForRESTAPI" in str(mailbox_error):
+                    return {
+                        'valid': False,
+                        'message': f'User {user.display_name} ({user_id}) mailbox is not enabled for REST API access',
+                        'user_info': user
+                    }
+                else:
+                    # Other errors might still allow calendar access, so we'll be optimistic
+                    return {
+                        'valid': True,
+                        'message': f'User {user.display_name} ({user_id}) validation completed with warnings: {mailbox_error}',
+                        'user_info': user
+                    }
+                    
+        except Exception as e:
+            return {
+                'valid': False,
+                'message': f'Error validating user {user_id}: {e}',
+                'user_info': None
+            }
 
     # Get a user by user ID
     async def get_user_by_user_id(self, user_id: str) -> User | None:
@@ -171,14 +240,39 @@ class GraphOperations:
             return []
                 
     # Get all users in the Microsoft 365 Tenant Entra Directory
-    async def get_all_users(self, max_results) -> List[User]:
+    async def get_all_users(self, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
+        """
+        Get all users from the Microsoft 365 tenant directory.
+        
+        Args:
+            max_results (int): Maximum number of results to return
+            exclude_inactive_mailboxes (bool): If True, filters out users without active mailboxes
+            
+        Returns:
+            List[User]: List of User objects, optionally filtered to exclude users without mailboxes
+        """
         try:
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
+            
+            # Include accountEnabled in the response fields for filtering
+            response_fields = self.user_response_fields.copy()
+            if "accountEnabled" not in response_fields:
+                response_fields.append("accountEnabled")
                         
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.user_response_fields
+            query_params.select = response_fields
+            
+            # Add filter to exclude users without active accounts at the API level
+            if exclude_inactive_mailboxes:
+                # Filter for active users with mail addresses
+                filters = [
+                    "accountEnabled eq true",
+                    "mail ne null"
+                ]
+                query_params.filter = " and ".join(filters)
+            
             # Limit results for testing
             query_params.top = max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
@@ -188,6 +282,10 @@ class GraphOperations:
 
             if hasattr(response, 'value'):
                 users = response.value
+                
+                if exclude_inactive_mailboxes and users:
+                    print(f"📊 Retrieved {len(users)} users with active accounts and email addresses")
+                
                 return users
             else:
                 return []
@@ -197,6 +295,7 @@ class GraphOperations:
             print("Full traceback:")
             traceback.print_exc()
             return []
+    
     
     # Get all departments
     # Get all users in the Microsoft 365 Tenant Entra Directory
@@ -234,7 +333,18 @@ class GraphOperations:
             return []
         
     # Get all users by department
-    async def get_users_by_department(self, department: str, max_results) -> List[User]:
+    async def get_users_by_department(self, department: str, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
+        """
+        Get users by department with optional inactive mailbox filtering.
+        
+        Args:
+            department (str): Department name to filter by
+            max_results (int): Maximum number of results to return
+            exclude_inactive_mailboxes (bool): If True, filters out users without active mailboxes
+            
+        Returns:
+            List[User]: List of User objects in the specified department
+        """
         if not department:
             return []
         try:
@@ -242,13 +352,26 @@ class GraphOperations:
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
             
-            # Add filter for department
-            if department:
-                query_params.filter = f"department eq '{department}'"
-                print(f"Applied filter: {query_params.filter}")
+            # Include accountEnabled in the response fields for filtering
+            response_fields = self.user_response_fields.copy()
+            if "accountEnabled" not in response_fields:
+                response_fields.append("accountEnabled")
+            
+            # Build filter combining department and mailbox filtering
+            filters = [f"department eq '{department}'"]
+            
+            if exclude_inactive_mailboxes:
+                mailbox_filters = [
+                    "accountEnabled eq true",
+                    "mail ne null"
+                ]
+                filters.extend(mailbox_filters)
+            
+            query_params.filter = " and ".join(filters)
+            print(f"Applied department + mailbox filter: {query_params.filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.user_response_fields
+            query_params.select = response_fields
             # Limit results for testing
             query_params.top = max_results
             
@@ -260,6 +383,10 @@ class GraphOperations:
 
             if hasattr(response, 'value'):
                 users = response.value
+                
+                if exclude_inactive_mailboxes and users:
+                    print(f"📊 Retrieved {len(users)} users with active mailboxes in {department}")
+                
                 return users
             else:
                 return []
@@ -270,19 +397,47 @@ class GraphOperations:
             traceback.print_exc()
             return []
         
-    async def search_users(self, filter, max_results) -> List[User]:
+    async def search_users(self, filter, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
+        """
+        Search for users with optional filtering to exclude users without active mailboxes.
+        
+        Args:
+            filter (str): OData filter string for user search
+            max_results (int): Maximum number of results to return
+            exclude_inactive_mailboxes (bool): If True, filters out users without active mailboxes
+            
+        Returns:
+            List[User]: List of User objects matching the filter criteria
+        """
         try:
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
             
-            # Add filter if provided
+            # Include accountEnabled in the response fields for filtering
+            response_fields = self.user_response_fields.copy()
+            if "accountEnabled" not in response_fields:
+                response_fields.append("accountEnabled")
+            
+            # Combine user filter with mailbox filtering
+            filters = []
             if filter:
-                query_params.filter = filter
-                # print(f"Applied filter: {filter}")
+                filters.append(f"({filter})")
+            
+            if exclude_inactive_mailboxes:
+                # Add mailbox filtering
+                mailbox_filters = [
+                    "accountEnabled eq true",
+                    "mail ne null"
+                ]
+                filters.extend(mailbox_filters)
+            
+            if filters:
+                query_params.filter = " and ".join(filters)
+                # print(f"Applied combined filter: {query_params.filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.user_response_fields
+            query_params.select = response_fields
             # Limit results for testing
             query_params.top = max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
@@ -292,6 +447,10 @@ class GraphOperations:
 
             if hasattr(response, 'value'):
                 users = response.value
+                
+                if exclude_inactive_mailboxes and users:
+                    print(f"📊 Search returned {len(users)} users with active mailboxes")
+                
                 return users
             else:
                 return []
@@ -306,62 +465,92 @@ class GraphOperations:
     # Get calendar events for a user by user ID with optional date range
     async def get_calendar_events_by_user_id(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> DirectoryObject  | None:
         try:
-            # Configure the request with proper query parameters
-            from msgraph.generated.users.users_request_builder import UsersRequestBuilder
-            query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
-                        
-            # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = self.calendar_response_fields
-            query_params.filter = f"id eq '{user_id}'"
-            # Limit results for testing
-            query_params.top = 1
-            request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
-                query_parameters=query_params
-            )
-            user_response = await self._get_client().users.get(request_configuration=request_configuration)
-
-            if hasattr(user_response, 'value') and user_response.value:
-                # response.value is a list, get the first (and should be only) user
-                user = user_response.value[0]
-
-                # Fetch event details if available
-                try:
-                    from msgraph.generated.users.item.calendar.events.events_request_builder import EventsRequestBuilder
-                    
-                    # Configure query parameters to order by start date
-                    events_query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters()
-                    events_query_params.orderby = ["start/dateTime"]
-                    events_query_params.select = self.calendar_response_fields
-                    
-                    # Add date range filter if provided
-                    filters = []
-                    if start_date:
-                        filters.append(f"start/dateTime ge '{start_date.isoformat()}'")
-                    if end_date:
-                        filters.append(f"end/dateTime le '{end_date.isoformat()}'")
-
-                    if filters:
-                        events_query_params.filter = " and ".join(filters)
-                    
-                    events_request_config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
-                        query_parameters=events_query_params
-                    )
-
-                    event_response = await self._get_client().users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
-                    if hasattr(event_response, 'value') and event_response.value:
-                        events = event_response.value
-                    else:
-                        events = []
-                except Exception as events_error:
-                    print(f"Could not fetch events for user {user_id}: {events_error}")
-                    events = None
-
-                return events
-            else:
+            # First validate the user's mailbox
+            validation_result = await self.validate_user_mailbox(user_id)
+            
+            if not validation_result['valid']:
+                print(f"❌ Mailbox validation failed: {validation_result['message']}")
                 return None
             
+            print(f"✅ Mailbox validation passed: {validation_result['message']}")
+            user = validation_result['user_info']
+            
+            # If we have a valid user, proceed with calendar access
+            try:
+                from msgraph.generated.users.item.calendar.events.events_request_builder import EventsRequestBuilder
+                
+                # Configure query parameters to order by start date
+                events_query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters()
+                events_query_params.orderby = ["start/dateTime"]
+                events_query_params.select = self.calendar_response_fields
+                
+                # Add date range filter if provided
+                filters = []
+                if start_date:
+                    filters.append(f"start/dateTime ge '{start_date.isoformat()}'")
+                if end_date:
+                    filters.append(f"end/dateTime le '{end_date.isoformat()}'")
+
+                if filters:
+                    events_query_params.filter = " and ".join(filters)
+                
+                events_request_config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
+                    query_parameters=events_query_params
+                )
+
+                event_response = await self._get_client().users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
+                if hasattr(event_response, 'value') and event_response.value:
+                    events = event_response.value
+                    print(f"📅 Retrieved {len(events)} calendar events for user {user.display_name}")
+                else:
+                    events = []
+                    print(f"📅 No calendar events found for user {user.display_name}")
+            except Exception as events_error:
+                # Enhanced error handling for specific Graph API errors
+                error_message = str(events_error)
+                print(f"Could not fetch events for user {user_id}: ")
+                print(f"        APIError")
+                print(f"        Code: {getattr(events_error, 'code', 'Unknown')}")
+                print(f"        message: {getattr(events_error, 'message', 'None')}")
+                print(f"        error: {getattr(events_error, 'error', events_error)}")
+                print(f"        ")
+                
+                # Provide specific guidance for common errors
+                if "MailboxNotEnabledForRESTAPI" in error_message:
+                    print("🔍 DIAGNOSIS: Mailbox Not Enabled for REST API")
+                    print("   This indicates the user's mailbox is either:")
+                    print("   • Inactive or disabled")
+                    print("   • Soft-deleted (recently removed)")
+                    print("   • Hosted on-premise (hybrid setup)")
+                    print("   • Not licensed for Exchange Online")
+                    print("")
+                    print("💡 SOLUTIONS:")
+                    print("   1. Verify the user exists and is active in Azure AD")
+                    print("   2. Check if user has an Exchange Online license")
+                    print("   3. Ensure mailbox is not soft-deleted")
+                    print("   4. For hybrid environments, verify cloud mailbox setup")
+                    print("   5. Contact admin to enable the mailbox for cloud access")
+                elif "Forbidden" in error_message or "403" in error_message:
+                    print("🔒 DIAGNOSIS: Permission Denied")
+                    print("   The application lacks required permissions to access this user's calendar")
+                    print("💡 SOLUTIONS:")
+                    print("   1. Ensure app has 'Calendars.Read' or 'Calendars.ReadWrite' permissions")
+                    print("   2. Admin consent may be required for application permissions")
+                    print("   3. Check if user has restricted their calendar sharing")
+                elif "NotFound" in error_message or "404" in error_message:
+                    print("👤 DIAGNOSIS: User or Calendar Not Found")
+                    print("   The user ID may be invalid or the user doesn't have a calendar")
+                    print("💡 SOLUTIONS:")
+                    print("   1. Verify the user ID is correct")
+                    print("   2. Check if the user exists in the tenant")
+                    print("   3. Ensure the user has an Exchange Online mailbox")
+                
+                events = None
+
+            return events
+            
         except Exception as e:
-            print(f"An error occurred with GraphOperations.users: {e}")
+            print(f"An error occurred with GraphOperations.get_calendar_events_by_user_id: {e}")
             print("Full traceback:")
             traceback.print_exc()
             return []
@@ -427,7 +616,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting all users in the Microsoft 365 Tenant Entra Directory...")
     # print(60 * "=")
-    # users = asyncio.run(ops.get_all_users(100))
+    # users = asyncio.run(ops.get_all_users(100, exclude_inactive_mailboxes=True))  # Filter out users without mailboxes
     # for user in users:
     #     print(60 * "=")
     #     print(f"ID: {user.id}")
@@ -487,7 +676,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting all users in the Information Technology department...")
     # print(60 * "=")
-    # it_users = asyncio.run(ops.get_users_by_department("Information Technology", 100))
+    # it_users = asyncio.run(ops.get_users_by_department("Information Technology", 100, exclude_inactive_mailboxes=True))
     # print(f"Found {len(it_users)} users in the Information Technology department:")
     # for user in it_users:
     #    print(f"  - {user.display_name} ({user.user_principal_name})")

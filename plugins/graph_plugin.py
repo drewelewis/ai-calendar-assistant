@@ -34,6 +34,7 @@ class GraphPlugin:
         description="""
         Useful for when you need to find users in Microsoft 365 Tenant Entra Directory.
         OData (Open Data Protocol) query language can be used to filter and search for users.
+        Automatically excludes users without active mailboxes by default.
         When searching for the CEO, you can also search for Chief Executive Officer, CEO, or similar titles.
         When searching for a CFO, you can search for Chief Financial Officer, CFO, or similar titles.
         Here are a few example queries:
@@ -45,12 +46,12 @@ class GraphPlugin:
          department eq 'Engineering' and jobTitle eq 'Manager'
         """
     )
-    async def user_search(self, filter: Annotated[str, "User search filter parameter. Use OData query syntax to filter users."]) -> Annotated[List[dict], "Returns a list of users matching the filter criteria."]:
-        self._log_function_call("user_search", filter=filter)
+    async def user_search(self, filter: Annotated[str, "User search filter parameter. Use OData query syntax to filter users."], include_inactive_mailboxes: Annotated[bool, "Set to true to include users without active mailboxes. Default is false."] = False) -> Annotated[List[dict], "Returns a list of users matching the filter criteria, excluding users without mailboxes by default."]:
+        self._log_function_call("user_search", filter=filter, include_inactive_mailboxes=include_inactive_mailboxes)
         if not filter: raise ValueError("Error: filter parameter is empty")
         try:
             # Using a synchronous approach here
-            return await graph_operations.search_users(filter, max_results=max_results)
+            return await graph_operations.search_users(filter, max_results=max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
         except Exception as e:
             print(f"Error in user_search: {e}")
             return []
@@ -61,6 +62,23 @@ class GraphPlugin:
         Returns detailed user information including display name, email, job title, department, and manager.
         """
     )
+    # Create new user
+    async def create_user(self, user_data: Annotated[dict, "User data to create a new user. Must include 'displayName', 'mail', 'userPrincipalName', and 'passwordProfile' fields."]) -> Annotated[dict, "Returns the created user's information."]:
+        self._log_function_call("create_user", user_data=user_data)
+        if not user_data or not isinstance(user_data, dict):
+            raise ValueError("Error: user_data parameter must be a dictionary with required fields")
+        
+        required_fields = ["displayName", "mail", "userPrincipalName", "passwordProfile"]
+        for field in required_fields:
+            if field not in user_data:
+                raise ValueError(f"Error: {field} is required in user_data")
+        
+        try:
+            return await graph_operations.create_user(user_data)
+        except Exception as e:
+            print(f"Error in create_user: {e}")
+            return {}
+        
     async def get_user_by_id(self, user_id: Annotated[str, "The unique user ID (GUID) of the user to retrieve"]) -> Annotated[dict, "Returns detailed information about the specified user."]:
         self._log_function_call("get_user_by_id", user_id=user_id)
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
@@ -103,15 +121,16 @@ class GraphPlugin:
     @kernel_function(
         description="""
         Useful for when you need to get all users from Microsoft 365 Tenant Entra Directory.
+        Automatically excludes users without active mailboxes by default, returning only users who can receive emails.
         Returns a list of all users with their basic information. Use max_results to limit the number of users returned.
         """
     )
-    async def get_all_users(self, max_results: Annotated[int, "Maximum number of users to return (default: 100)"] = 100) -> Annotated[List[dict], "Returns a list of users from the Microsoft 365 Tenant Entra Directory."]:
-        self._log_function_call("get_all_users", max_results=max_results)
+    async def get_all_users(self, max_results: Annotated[int, "Maximum number of users to return (default: 100)"] = 100, include_inactive_mailboxes: Annotated[bool, "Set to true to include users without active mailboxes. Default is false."] = False) -> Annotated[List[dict], "Returns a list of users from the Microsoft 365 Tenant Entra Directory, excluding users without mailboxes by default."]:
+        self._log_function_call("get_all_users", max_results=max_results, include_inactive_mailboxes=include_inactive_mailboxes)
         if max_results <= 0: raise ValueError("Error: max_results must be greater than 0")
         if max_results > 1000: raise ValueError("Error: max_results cannot exceed 1000")
         try:
-            return await graph_operations.get_all_users(max_results)
+            return await graph_operations.get_all_users(max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
         except Exception as e:
             print(f"Error in get_all_users: {e}")
             return []
@@ -119,6 +138,7 @@ class GraphPlugin:
     @kernel_function(
         description="""
         Useful for when you need to get all users from a specific department in Microsoft 365 Tenant Entra Directory.
+        Automatically excludes users without active mailboxes by default, returning only users who can receive emails.
         Returns a list of users from the specified department.
 
         When searching for departments, you need to be aware that the department names may vary.
@@ -127,13 +147,13 @@ class GraphPlugin:
         If you are not sure about the exact department name to choose, never guess, you will ask the user to clarify.
         """
     )
-    async def get_users_by_department(self, department: Annotated[str, "The department name to filter users by"], max_results: Annotated[int, "Maximum number of users to return (default: 100)"] = 100) -> Annotated[List[dict], "Returns a list of users from the specified department."]:
-        self._log_function_call("get_users_by_department", department=department, max_results=max_results)
+    async def get_users_by_department(self, department: Annotated[str, "The department name to filter users by"], max_results: Annotated[int, "Maximum number of users to return (default: 100)"] = 100, include_inactive_mailboxes: Annotated[bool, "Set to true to include users without active mailboxes. Default is false."] = False) -> Annotated[List[dict], "Returns a list of users from the specified department, excluding users without mailboxes by default."]:
+        self._log_function_call("get_users_by_department", department=department, max_results=max_results, include_inactive_mailboxes=include_inactive_mailboxes)
         if not department or not department.strip(): raise ValueError("Error: department parameter is empty")
         if max_results <= 0: raise ValueError("Error: max_results must be greater than 0")
         if max_results > 1000: raise ValueError("Error: max_results cannot exceed 1000")
         try:
-            return await graph_operations.get_users_by_department(department.strip(), max_results)
+            return await graph_operations.get_users_by_department(department.strip(), max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
         except Exception as e:
             print(f"Error in get_users_by_department: {e}")
             return []
@@ -156,9 +176,31 @@ class GraphPlugin:
 
     @kernel_function(
         description="""
+        Useful for validating if a user has a valid mailbox before attempting calendar operations.
+        This helps identify users whose mailboxes are inactive, soft-deleted, or hosted on-premise.
+        Returns validation status and helpful diagnostic information.
+        """
+    )
+    async def validate_user_mailbox(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose mailbox you want to validate"]) -> Annotated[dict, "Returns validation result with status and diagnostic information."]:
+        self._log_function_call("validate_user_mailbox", user_id=user_id)
+        if not user_id or not user_id.strip(): 
+            raise ValueError("Error: user_id parameter is empty")
+        try:
+            return await graph_operations.validate_user_mailbox(user_id.strip())
+        except Exception as e:
+            print(f"Error in validate_user_mailbox: {e}")
+            return {
+                'valid': False,
+                'message': f'Error validating user: {e}',
+                'user_info': None
+            }
+
+    @kernel_function(
+        description="""
         Useful for when you need to get calendar events for a specific user from Microsoft 365.
         You can optionally specify a date range to filter events. Dates should be in ISO 8601 format (e.g., '2025-07-01T00:00:00Z').
         Returns a list of calendar events including subject, start time, end time, location, and attendees.
+        This function includes enhanced error handling for mailbox issues.
         """
     )
     async def get_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[str, "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[str, "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
@@ -192,9 +234,32 @@ class GraphPlugin:
                 end_datetime = None
         
         try:
-            return await graph_operations.get_calendar_events_by_user_id(user_id.strip(), start_datetime, end_datetime)
+            result = await graph_operations.get_calendar_events_by_user_id(user_id.strip(), start_datetime, end_datetime)
+            
+            # Handle case where result is None (validation failed or error occurred)
+            if result is None:
+                print(f"⚠️ Unable to retrieve calendar events for user {user_id}")
+                print("   This is typically due to:")
+                print("   • Mailbox not enabled for REST API")
+                print("   • User account is inactive or disabled")
+                print("   • Insufficient permissions")
+                print("   • User has no Exchange Online license")
+                return []
+                
+            return result
         except Exception as e:
+            error_message = str(e)
             print(f"Error in get_calendar_events: {e}")
+            
+            # Provide user-friendly error context
+            if "MailboxNotEnabledForRESTAPI" in error_message:
+                print("💡 TIP: Try validating the user's mailbox first using validate_user_mailbox function")
+                print("   This error typically means the user doesn't have a cloud-based Exchange mailbox")
+            elif "Forbidden" in error_message or "403" in error_message:
+                print("💡 TIP: Check application permissions - may need Calendars.Read or admin consent")
+            elif "NotFound" in error_message or "404" in error_message:
+                print("💡 TIP: Verify the user ID exists and the user has an active mailbox")
+                
             return []
 
     @kernel_function(

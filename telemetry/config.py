@@ -79,6 +79,10 @@ class TelemetryConfig:
             
         except Exception as e:
             console_error(f"Failed to configure telemetry: {e}")
+            console_warning("⚠️  TELEMETRY CONFIGURATION FAILED")
+            console_info("   The application will continue running, but telemetry data will not be collected.")
+            console_info("   This may affect monitoring and debugging capabilities in production.")
+            console_info("   Check Application Insights connection string and authentication settings.")
             return False
     
     def _configure_auto_instrumentation(self):

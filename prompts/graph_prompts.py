@@ -35,6 +35,13 @@ class M365Prompts:
                 - Cannot access external calendars outside the organization
                 - Cannot modify system-level calendar settings
                 - Cannot access personal information beyond what's necessary for scheduling
+                - Some users may have inactive mailboxes or be hosted on-premise
+                
+                ERROR HANDLING:
+                - If a user's mailbox is not available (MailboxNotEnabledForRESTAPI error), explain the issue clearly
+                - Suggest alternative users or recommend contacting IT support for mailbox issues
+                - Always validate user mailboxes before attempting calendar operations when possible
+                - Provide helpful troubleshooting steps for common Graph API errors
                 
                 """.strip()
         )
@@ -60,6 +67,15 @@ class M365Prompts:
                 11. Always check the availability of all attendees before creating a meeting.
                 12. Always provide options for alternative times if attendees are not available.
                 13. You will have access to tools to get information out of the Microsoft 365 Graph API, including: users and calendars.
+                14. If calendar access fails due to mailbox issues, validate the user's mailbox first and provide clear explanations.
+                15. When encountering "MailboxNotEnabledForRESTAPI" errors, explain that the user's mailbox may be inactive, hosted on-premise, or unlicensed.
+
+                ERROR HANDLING PROCEDURES:
+                - Before accessing calendars, consider validating the user's mailbox using validate_user_mailbox function
+                - If calendar access fails, explain the specific error in user-friendly terms
+                - For mailbox errors, suggest contacting IT support or checking user licensing
+                - Offer to try alternative users or suggest workarounds when possible
+                - Always remain helpful and suggest next steps even when errors occur
 
                 STEPS TO SCHEDULE A MEETING:
                 1. Understand the user's request for scheduling a meeting.
