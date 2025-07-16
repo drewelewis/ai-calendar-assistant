@@ -75,19 +75,19 @@ async def test_mailbox_filtering():
         else:
             print("   ℹ️ No users without active mailboxes found")
     
-    # Test 4: Test search with filtering
-    print("\n4️⃣ Testing search with mailbox filtering...")
+    # Test 4: Test search with two-stage filtering
+    print("\n4️⃣ Testing search with two-stage mailbox filtering...")
     try:
         # Search for all enabled users
         search_with_inactive = await graph_ops.search_users("accountEnabled eq true", max_results=20, exclude_inactive_mailboxes=False)
         search_with_mailboxes = await graph_ops.search_users("accountEnabled eq true", max_results=20, exclude_inactive_mailboxes=True)
         
-        print(f"   Search results (with inactive mailboxes): {len(search_with_inactive)}")
-        print(f"   Search results (with active mailboxes only): {len(search_with_mailboxes)}")
+        print(f"   Search results (no mail filtering): {len(search_with_inactive)}")
+        print(f"   Search results (with mail filtering): {len(search_with_mailboxes)}")
         
         if len(search_with_inactive) > len(search_with_mailboxes):
             filtered_count = len(search_with_inactive) - len(search_with_mailboxes)
-            print(f"   🔧 Search filtering removed {filtered_count} users without active mailboxes")
+            print(f"   🔧 Two-stage filtering removed {filtered_count} users without email addresses")
         
     except Exception as e:
         print(f"   Error in search test: {e}")
@@ -133,9 +133,11 @@ def main():
     print("✅ Mailbox filtering has been implemented!")
     print("")
     print("🔧 HOW IT WORKS:")
-    print("• API-level filtering: Uses OData filters to exclude users without mailboxes")
-    print("• Checks: accountEnabled eq true AND mail ne null")
-    print("• Simple and effective for calendar applications")
+    print("• API-level filtering: Uses OData filters to get active users (accountEnabled eq true)")
+    print("• Client-side filtering: Validates mailbox properties (account enabled + mail address)")
+    print("• Graph API validation: Uses /mailboxSettings and /messages endpoints to verify mailbox")
+    print("• RBAC compliant: Follows Microsoft's recommended approach for application permissions")
+    print("• Error handling: Distinguishes between different mailbox error types")
     print("")
     print("🚀 USAGE:")
     print("• All user functions now have an 'exclude_inactive_mailboxes' parameter")
@@ -143,9 +145,20 @@ def main():
     print("• Set exclude_inactive_mailboxes=False to include all users")
     print("")
     print("📝 WHAT'S FILTERED:")
-    print("• Users with accountEnabled = false")
-    print("• Users without email addresses (mail = null)")
-    print("• Focus on users who can actually receive calendar invitations")
+    print("• Users with accountEnabled = false (API-level)")
+    print("• Users without email addresses - mail = null (client-side)")
+    print("• Focus on users with valid Exchange Online mailboxes")
+    print("")
+    print("🔍 VALIDATION METHOD:")
+    print("• Uses Microsoft Graph /mailboxSettings endpoint (primary)")
+    print("• Fallback to /messages endpoint if needed")
+    print("• Detects ErrorMailboxNotEnabled and MailboxNotEnabledForRESTAPI")
+    print("• Follows Microsoft's RBAC for Applications guidance")
+    print("")
+    print("⚠️  COMPATIBILITY NOTE:")
+    print("• Uses two-stage filtering to avoid Graph API 'NotEqualsMatch' errors")
+    print("• API filtering: accountEnabled eq true (supported)")
+    print("• Client filtering: mailbox property validation (efficient)")
 
 if __name__ == "__main__":
     main()

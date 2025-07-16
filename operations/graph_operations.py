@@ -72,6 +72,27 @@ class GraphOperations:
     def get_current_datetime(self) -> str:
         return datetime.now().isoformat()
     
+    def _has_valid_mailbox_properties(self, user: User) -> bool:
+        """
+        Quick client-side check for mailbox indicators.
+        This is a preliminary check before making API calls for full validation.
+        
+        Args:
+            user (User): User object to check
+            
+        Returns:
+            bool: True if user appears to have mailbox properties, False otherwise
+        """
+        # Check if user account is enabled
+        if hasattr(user, 'account_enabled') and not user.account_enabled:
+            return False
+            
+        # Check if user has mail property (indicates Exchange mailbox assignment)
+        if not hasattr(user, 'mail') or not user.mail:
+            return False
+            
+        return True
+
     # Helper method to validate if a user has a valid mailbox for calendar operations
     async def validate_user_mailbox(self, user_id: str) -> dict:
         """
@@ -93,46 +114,82 @@ class GraphOperations:
                     'message': f'User {user_id} not found in the directory',
                     'user_info': None
                 }
+            # Check for valid Exchange Online mailbox using Microsoft Graph API
+            # A "valid mailbox" means the user has an Exchange Online mailbox provisioned
+            # We'll test mailbox access using the recommended Graph API endpoints
             
-            # Check if user has mail property (indicates Exchange mailbox)
-            if not hasattr(user, 'mail') or not user.mail:
-                return {
-                    'valid': False,
-                    'message': f'User {user.display_name} ({user_id}) does not have an Exchange mailbox assigned',
-                    'user_info': user
-                }
-            
-            # Check if user account is enabled
-            if hasattr(user, 'account_enabled') and not user.account_enabled:
-                return {
-                    'valid': False,
-                    'message': f'User {user.display_name} ({user_id}) account is disabled',
-                    'user_info': user
-                }
-            
-            # Try a simple mailbox access test by getting mailbox settings
+            # Test for valid Exchange Online mailbox using Microsoft Graph API
+            # Try multiple endpoints to determine if user has a valid mailbox
             try:
-                await self._get_client().users.by_user_id(user_id).mailbox_settings.get()
-                return {
-                    'valid': True,
-                    'message': f'User {user.display_name} ({user_id}) has a valid mailbox',
-                    'user_info': user
-                }
+                # Method 1: Try to access mailbox settings (recommended approach)
+                # If user doesn't have a mailbox, this will return ErrorMailboxNotEnabled
+                mailbox_settings = await self._get_client().users.by_user_id(user_id).mailbox_settings.get()
+                
+                if mailbox_settings:
+                    return {
+                        'valid': True,
+                        'message': f'User {user.display_name} ({user_id}) has a valid Exchange Online mailbox',
+                        'user_info': user
+                    }
+                    
             except Exception as mailbox_error:
-                # If we can't access mailbox settings, the mailbox might not be enabled for REST API
-                if "MailboxNotEnabledForRESTAPI" in str(mailbox_error):
+                error_message = str(mailbox_error)
+                
+                # Check for specific mailbox-related errors
+                if "MailboxNotEnabledForRESTAPI" in error_message:
                     return {
                         'valid': False,
-                        'message': f'User {user.display_name} ({user_id}) mailbox is not enabled for REST API access',
+                        'message': f'User {user.display_name} ({user_id}) mailbox is not enabled for REST API access (likely on-premise or inactive)',
+                        'user_info': user
+                    }
+                elif "ErrorMailboxNotEnabled" in error_message:
+                    return {
+                        'valid': False,
+                        'message': f'User {user.display_name} ({user_id}) does not have an Exchange Online mailbox provisioned',
+                        'user_info': user
+                    }
+                elif "Forbidden" in error_message or "403" in error_message:
+                    return {
+                        'valid': False,
+                        'message': f'Access denied to mailbox for user {user.display_name} ({user_id}) - insufficient permissions',
+                        'user_info': user
+                    }
+                elif "NotFound" in error_message or "404" in error_message:
+                    return {
+                        'valid': False,
+                        'message': f'User {user.display_name} ({user_id}) or mailbox not found',
                         'user_info': user
                     }
                 else:
-                    # Other errors might still allow calendar access, so we'll be optimistic
-                    return {
-                        'valid': True,
-                        'message': f'User {user.display_name} ({user_id}) validation completed with warnings: {mailbox_error}',
-                        'user_info': user
-                    }
+                    # Try fallback method: check messages endpoint
+                    try:
+                        # Method 2: Try to access messages (alternative approach)
+                        # This is another way to test for valid mailbox
+                        messages_response = await self._get_client().users.by_user_id(user_id).messages.get()
+                        
+                        # If we can access messages (even if empty), mailbox is valid
+                        return {
+                            'valid': True,
+                            'message': f'User {user.display_name} ({user_id}) has a valid Exchange Online mailbox (verified via messages endpoint)',
+                            'user_info': user
+                        }
+                        
+                    except Exception as messages_error:
+                        messages_error_str = str(messages_error)
+                        
+                        if "MailboxNotEnabledForRESTAPI" in messages_error_str or "ErrorMailboxNotEnabled" in messages_error_str:
+                            return {
+                                'valid': False,
+                                'message': f'User {user.display_name} ({user_id}) does not have a valid Exchange Online mailbox',
+                                'user_info': user
+                            }
+                        else:
+                            # If both methods fail with non-mailbox errors, assume valid but with access issues
+                            return {
+                                'valid': False,
+                                'message': f'Cannot verify mailbox for user {user.display_name} ({user_id}): {mailbox_error}',
+                                'user_info': user
+                            }
                     
         except Exception as e:
             return {
@@ -266,12 +323,8 @@ class GraphOperations:
             
             # Add filter to exclude users without active accounts at the API level
             if exclude_inactive_mailboxes:
-                # Filter for active users with mail addresses
-                filters = [
-                    "accountEnabled eq true",
-                    "mail ne null"
-                ]
-                query_params.filter = " and ".join(filters)
+                # Only filter for active users at API level - mail filtering done client-side
+                query_params.filter = "accountEnabled eq true"
             
             # Limit results for testing
             query_params.top = max_results
@@ -284,7 +337,13 @@ class GraphOperations:
                 users = response.value
                 
                 if exclude_inactive_mailboxes and users:
-                    print(f"📊 Retrieved {len(users)} users with active accounts and email addresses")
+                    # Client-side filtering using improved mailbox property validation
+                    original_count = len(users)
+                    users = [user for user in users if self._has_valid_mailbox_properties(user)]
+                    filtered_count = original_count - len(users)
+                    print(f"📊 Retrieved {original_count} users, filtered out {filtered_count} without valid mailbox properties, {len(users)} users remaining")
+                else:
+                    print(f"📊 Retrieved {len(users)} users (no mailbox filtering applied)")
                 
                 return users
             else:
@@ -361,11 +420,8 @@ class GraphOperations:
             filters = [f"department eq '{department}'"]
             
             if exclude_inactive_mailboxes:
-                mailbox_filters = [
-                    "accountEnabled eq true",
-                    "mail ne null"
-                ]
-                filters.extend(mailbox_filters)
+                # Only filter for active users at API level - mail filtering done client-side
+                filters.append("accountEnabled eq true")
             
             query_params.filter = " and ".join(filters)
             print(f"Applied department + mailbox filter: {query_params.filter}")
@@ -385,7 +441,13 @@ class GraphOperations:
                 users = response.value
                 
                 if exclude_inactive_mailboxes and users:
-                    print(f"📊 Retrieved {len(users)} users with active mailboxes in {department}")
+                    # Client-side filtering using improved mailbox property validation
+                    original_count = len(users)
+                    users = [user for user in users if self._has_valid_mailbox_properties(user)]
+                    filtered_count = original_count - len(users)
+                    print(f"📊 Retrieved {original_count} users from {department}, filtered out {filtered_count} without valid mailbox properties, {len(users)} users remaining")
+                else:
+                    print(f"📊 Retrieved {len(users)} users from {department} (no mailbox filtering applied)")
                 
                 return users
             else:
@@ -425,12 +487,8 @@ class GraphOperations:
                 filters.append(f"({filter})")
             
             if exclude_inactive_mailboxes:
-                # Add mailbox filtering
-                mailbox_filters = [
-                    "accountEnabled eq true",
-                    "mail ne null"
-                ]
-                filters.extend(mailbox_filters)
+                # Only filter for active users at API level - mail filtering done client-side
+                filters.append("accountEnabled eq true")
             
             if filters:
                 query_params.filter = " and ".join(filters)
@@ -449,7 +507,13 @@ class GraphOperations:
                 users = response.value
                 
                 if exclude_inactive_mailboxes and users:
-                    print(f"📊 Search returned {len(users)} users with active mailboxes")
+                    # Client-side filtering using improved mailbox property validation
+                    original_count = len(users)
+                    users = [user for user in users if self._has_valid_mailbox_properties(user)]
+                    filtered_count = original_count - len(users)
+                    print(f"📊 Search returned {original_count} users, filtered out {filtered_count} without valid mailbox properties, {len(users)} users remaining")
+                else:
+                    print(f"📊 Search returned {len(users)} users (no mailbox filtering applied)")
                 
                 return users
             else:
