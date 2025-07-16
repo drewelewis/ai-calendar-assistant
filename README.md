@@ -266,25 +266,128 @@ print(follow_up)
 
 ## 📊 Advanced Features
 
-### Token Tracking and Cost Monitoring
+### 🎯 Token Tracking and Cost Monitoring
 
-The application includes comprehensive token tracking for cost optimization:
+The AI Calendar Assistant includes a comprehensive token tracking system that provides both per-request spans and aggregated metrics for OpenAI API usage monitoring.
+
+#### Overview
+
+The token tracking system provides:
+
+- **Spans**: Per-request token tracking with detailed metadata and latency information
+- **Metrics**: Aggregated token usage and cost monitoring across all requests
+- **Automatic Instrumentation**: Transparent tracking for Semantic Kernel OpenAI calls
+- **Cost Estimation**: Real-time cost calculations based on current pricing models
+
+#### 📊 Span-Level Tracking (Per-Request)
+
+Each OpenAI API call creates a detailed span with the following attributes:
+
+- `openai.tokens.prompt` - Number of input tokens
+- `openai.tokens.completion` - Number of output tokens  
+- `openai.tokens.total` - Total tokens consumed
+- `openai.model` - Model/deployment name used
+- `openai.duration_ms` - Request latency in milliseconds
+- `openai.cost.estimated_usd` - Estimated cost in USD
+- `openai.cost.estimated_cents` - Estimated cost in cents
+- `operation` - Type of operation (chat_completion, etc.)
+
+#### 📈 Aggregated Metrics
+
+The system records the following metrics for monitoring and alerting:
+
+- **`openai_tokens_total`** - Counter tracking total tokens by type
+  - Labels: `model`, `operation`, `token_type` (total/prompt/completion), `status`
+- **`openai_token_cost_total`** - Counter tracking estimated costs in cents
+  - Labels: `model`, `operation`, `status`
+- **`openai_request_duration_ms`** - Histogram of request latencies
+  - Labels: `model`, `operation`, `status`
+
+#### 🤖 Automatic Instrumentation
+
+Semantic Kernel OpenAI service calls are automatically instrumented without code changes:
 
 ```python
-# Automatic token tracking with telemetry
-from telemetry import track_openai_tokens
-
-@track_openai_tokens(model_name="gpt-4o")
-async def custom_openai_call():
-    # Token usage, costs, and latency automatically tracked
-    pass
+# This call is automatically tracked
+response = await agent.get_response(messages=message, thread=thread)
 ```
 
-**Monitoring Capabilities:**
-- **Per-Request Tracking**: Token counts, costs, and latency in spans
-- **Aggregated Metrics**: Total usage, cost trends, and performance monitoring
-- **Cost Estimation**: Real-time cost calculations based on Azure OpenAI pricing
-- **Azure Integration**: All telemetry data flows to Application Insights
+#### Core Components
+
+1. **`telemetry/token_tracking.py`** - Core token tracking utilities
+2. **`telemetry/semantic_kernel_instrumentation.py`** - Automatic SK instrumentation
+3. **`telemetry/config.py`** - Enhanced telemetry configuration
+4. **`telemetry/decorators.py`** - Existing telemetry decorators
+
+#### Token Pricing Models
+
+The system includes current pricing for common Azure OpenAI models:
+
+```python
+TOKEN_PRICING = {
+    "gpt-4o": {
+        "input": 0.005,   # $0.005 per 1K input tokens
+        "output": 0.015,  # $0.015 per 1K output tokens
+    },
+    "gpt-4o-mini": {
+        "input": 0.00015,
+        "output": 0.0006,
+    },
+    # ... more models
+}
+```
+
+#### Cost Calculation
+
+Costs are calculated using the formula:
+```
+Total Cost = (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
+```
+
+#### Usage Examples
+
+**Automatic Tracking (Recommended)**
+
+The simplest approach - just initialize telemetry and use your existing code:
+
+```python
+from telemetry import initialize_telemetry
+from ai.agent import Agent
+
+# Initialize telemetry (enables automatic tracking)
+initialize_telemetry()
+
+# All OpenAI calls are now automatically tracked
+agent = Agent("session-123")
+response = await agent.invoke("Hello!")  # Automatically tracked
+```
+
+**Manual Tracking with Decorator**
+
+For direct OpenAI API calls, use the tracking decorator:
+
+```python
+from telemetry import track_openai_tokens
+
+@track_openai_tokens(model_name="gpt-4o", operation_name="custom_chat")
+async def my_openai_call():
+    response = await client.chat.completions.create(...)
+    return response
+```
+
+**Manual Span Attributes**
+
+Add token information to existing spans:
+
+```python
+from telemetry import add_token_span_attributes, record_token_metrics
+
+# Add to current span
+add_token_span_attributes(openai_response, "gpt-4o")
+
+# Record aggregated metrics
+record_token_metrics(openai_response, "gpt-4o", "chat_completion")
+```
 
 ### Microsoft Graph Operations
 
@@ -333,27 +436,104 @@ The AI agent uses sophisticated prompting to handle complex scheduling scenarios
 
 ### Application Insights Integration
 
-Monitor your AI Calendar Assistant with comprehensive telemetry:
+Monitor your AI Calendar Assistant with comprehensive telemetry and detailed token tracking:
 
+#### Token Usage and Cost Monitoring
+
+**View token usage by model:**
 ```kusto
-// View token usage trends
 customMetrics
 | where name == "openai_tokens_total"
-| summarize sum(value) by tostring(customDimensions.model), bin(timestamp, 1h)
+| summarize TotalTokens = sum(value) by tostring(customDimensions.model), bin(timestamp, 1h)
 | render timechart
+```
 
-// Track API performance
+**Track costs over time:**
+```kusto
+customMetrics
+| where name == "openai_token_cost_total"
+| summarize TotalCostCents = sum(value) by bin(timestamp, 1h)
+| extend TotalCostUSD = TotalCostCents / 100
+| render timechart
+```
+
+**Monitor request latency by model:**
+```kusto
+customMetrics
+| where name == "openai_request_duration_ms"
+| summarize avg(value), percentile(value, 95) by tostring(customDimensions.model), bin(timestamp, 5m)
+| render timechart
+```
+
+**Find expensive requests:**
+```kusto
+dependencies
+| where name contains "openai"
+| where customDimensions.["openai.cost.estimated_usd"] > 0.01  // Requests over 1 cent
+| project timestamp, customDimensions.["openai.model"], customDimensions.["openai.tokens.total"], customDimensions.["openai.cost.estimated_usd"]
+| order by timestamp desc
+```
+
+**Token usage breakdown by operation type:**
+```kusto
+customMetrics
+| where name == "openai_tokens_total"
+| summarize TotalTokens = sum(value) by tostring(customDimensions.operation), tostring(customDimensions.token_type)
+| render piechart
+```
+
+#### Performance Monitoring
+
+**API performance trends:**
+```kusto
 requests
 | where name == "POST /agent_chat"
 | summarize avg(duration), percentile(duration, 95) by bin(timestamp, 5m)
 | render timechart
+```
 
-// Monitor costs
-customMetrics
-| where name == "openai_token_cost_total"
-| summarize TotalCostUSD = sum(value) / 100 by bin(timestamp, 1d)
+**Error rate monitoring:**
+```kusto
+requests
+| summarize ErrorRate = 100.0 * countif(success == false) / count() by bin(timestamp, 5m)
 | render timechart
 ```
+
+#### Setting Up Alerts
+
+Create alerts in Azure Monitor for:
+
+1. **High Token Usage**: Alert when hourly token usage exceeds threshold
+   ```kusto
+   customMetrics
+   | where name == "openai_tokens_total"
+   | summarize TotalTokens = sum(value) by bin(timestamp, 1h)
+   | where TotalTokens > 100000  // Adjust threshold as needed
+   ```
+
+2. **Cost Monitoring**: Alert when daily costs exceed budget
+   ```kusto
+   customMetrics
+   | where name == "openai_token_cost_total"
+   | summarize DailyCostUSD = sum(value) / 100 by bin(timestamp, 1d)
+   | where DailyCostUSD > 50  // Adjust budget threshold
+   ```
+
+3. **Error Rates**: Alert on high failure rates for OpenAI calls
+   ```kusto
+   dependencies
+   | where name contains "openai"
+   | summarize ErrorRate = 100.0 * countif(success == false) / count() by bin(timestamp, 5m)
+   | where ErrorRate > 5  // Alert if error rate > 5%
+   ```
+
+4. **Latency Issues**: Alert when 95th percentile latency is too high
+   ```kusto
+   customMetrics
+   | where name == "openai_request_duration_ms"
+   | summarize P95Latency = percentile(value, 95) by bin(timestamp, 5m)
+   | where P95Latency > 5000  // Alert if P95 > 5 seconds
+   ```
 
 ### Health Monitoring
 
@@ -418,8 +598,14 @@ ai-calendar-assistant/
 # Run token tracking tests
 python test_token_tracking.py
 
-# Test telemetry demo
+# Test telemetry demo with token tracking
 python demo_token_tracking.py
+
+# This will:
+# 1. Initialize telemetry
+# 2. Create test OpenAI API calls
+# 3. Show token tracking in action
+# 4. Display available metrics
 
 # Manual Graph API testing
 python operations/graph_operations.py
@@ -435,9 +621,9 @@ python operations/graph_operations.py
 
 ## 📚 Documentation
 
-- **[Token Tracking Guide](TOKEN_TRACKING.md)** - Comprehensive token usage monitoring
 - **[Telemetry Documentation](TELEMETRY.md)** - OpenTelemetry and Application Insights integration
 - **[CosmosDB Setup](_cosmosdb_auth_setup.md)** - Database configuration and authentication
+- **[Deployment Guide](DEPLOYMENT.md)** - Step-by-step deployment instructions
 
 ## 🔧 Troubleshooting
 
@@ -452,10 +638,25 @@ az account show
 az ad app permission list --id your-app-id
 ```
 
-**Token Tracking Not Working**
-- Verify `APPLICATIONINSIGHTS_CONNECTION_STRING` is set
-- Check telemetry initialization logs
-- Ensure OpenTelemetry packages are installed
+**Token Tracking Issues**
+
+*Token Information Not Appearing:*
+1. **Check Semantic Kernel Version**: Ensure you're using a compatible version
+2. **Verify Response Structure**: Token usage might be in different response attributes
+3. **Enable Debug Logging**: Set log level to DEBUG to see extraction attempts
+4. **Verify Application Insights**: Ensure `APPLICATIONINSIGHTS_CONNECTION_STRING` is set
+5. **Check Telemetry Initialization**: Ensure `initialize_telemetry()` returns `True`
+
+*Cost Calculations Seem Wrong:*
+1. **Update Pricing**: Check if pricing models in `TOKEN_PRICING` are current
+2. **Model Mapping**: Ensure your deployment name maps to the correct pricing model
+3. **Token Extraction**: Verify token counts are being extracted correctly
+
+*Missing Metrics in Application Insights:*
+1. **Connection String**: Verify `APPLICATIONINSIGHTS_CONNECTION_STRING` is set correctly
+2. **Telemetry Initialization**: Ensure telemetry is properly initialized in your application
+3. **Buffering**: Metrics may take a few minutes to appear in Application Insights
+4. **Network Connectivity**: Check if your application can reach Application Insights endpoints
 
 **Graph API Errors**
 - Confirm application has required Microsoft Graph permissions
@@ -493,6 +694,15 @@ az ad app permission list --id your-app-id
 - [ ] **Email Integration** - Automatic meeting invitations and updates
 - [ ] **Mobile API** - Optimized endpoints for mobile applications
 - [ ] **Analytics Dashboard** - Usage insights and optimization recommendations
+
+### Token Tracking Enhancements
+
+- [ ] **Real-time Pricing API** - Automatically update pricing from Azure API
+- [ ] **Budget Enforcement** - Add spending limits and automatic throttling
+- [ ] **Usage Analytics** - Dashboard showing usage patterns and optimization opportunities
+- [ ] **Model Recommendation** - Suggest optimal models based on usage patterns
+- [ ] **Cost Alerts** - Proactive notifications for spending thresholds
+- [ ] **Usage Forecasting** - Predict future costs based on usage trends
 
 ### Performance Enhancements
 

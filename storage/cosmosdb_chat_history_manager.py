@@ -55,35 +55,52 @@ class CosmosDBChatHistoryManager:
                     logger.error("   2. Managed Identity doesn't have proper permissions on CosmosDB")
                     logger.error("   3. Running outside of Azure environment without proper configuration")
                 
-                # Fall back to connection key if available
-                cosmos_key = os.getenv("COSMOS_KEY")
-                if cosmos_key:
-                    try:
-                        logger.info("🔄 Falling back to connection key authentication...")
-                        logger.info(f"🌐 Retry connecting to CosmosDB URL: {endpoint}")
-                        print(f"🔄 Retrying with connection key for URL: {endpoint}")  # Also print to console
-                        
-                        self.client = CosmosClient(endpoint, cosmos_key)
-                        logger.info("✅ Connected to CosmosDB using connection key")
-                        
-                        # Test the connection
-                        list(self.client.list_databases())
-                        logger.info("✅ CosmosDB connection verified with connection key")
-                        
-                    except Exception as key_error:
-                        logger.error(f"❌ Connection key authentication also failed: {key_error}")
-                        print(f"❌ Connection key also failed for URL: {endpoint}")  # Also print to console
+                # Check environment setting to determine if key fallback is allowed
+                environment = os.getenv("ENVIRONMENT", "production").lower()
+                logger.info(f"🌍 Environment detected for fallback logic: {environment}")
+                
+                # Only allow connection key fallback in development/local environments
+                if environment in ["development", "local", "dev"]:
+                    logger.info("🔧 Development environment detected - checking for connection key fallback...")
+                    cosmos_key = os.getenv("COSMOS_KEY")
+                    if cosmos_key:
+                        try:
+                            logger.info("🔄 Falling back to connection key authentication...")
+                            logger.info(f"🌐 Retry connecting to CosmosDB URL: {endpoint}")
+                            print(f"🔄 Retrying with connection key for URL: {endpoint}")  # Also print to console
+                            
+                            self.client = CosmosClient(endpoint, cosmos_key)
+                            logger.info("✅ Connected to CosmosDB using connection key")
+                            
+                            # Test the connection
+                            list(self.client.list_databases())
+                            logger.info("✅ CosmosDB connection verified with connection key")
+                            
+                        except Exception as key_error:
+                            logger.error(f"❌ Connection key authentication also failed: {key_error}")
+                            print(f"❌ Connection key also failed for URL: {endpoint}")  # Also print to console
+                            raise ClientAuthenticationError(
+                                f"Failed to connect with both Azure Identity and connection key. "
+                                f"Azure Identity error: {e}. Connection key error: {key_error}"
+                            )
+                    else:
+                        logger.error("❌ No COSMOS_KEY environment variable found for fallback")
                         raise ClientAuthenticationError(
-                            f"Failed to connect with both Azure Identity and connection key. "
-                            f"Azure Identity error: {e}. Connection key error: {key_error}"
+                            f"Azure Identity failed and no connection key available for development environment. "
+                            f"Error: {e}. Please either:\n"
+                            f"1. Fix Azure Identity authentication (recommended), or\n"
+                            f"2. Set COSMOS_KEY environment variable for development"
                         )
                 else:
-                    logger.error("❌ No COSMOS_KEY environment variable found for fallback")
+                    logger.error("🚀 Production environment detected - connection key fallback is DISABLED for security")
+                    logger.error("   Azure Identity authentication is REQUIRED in production environments")
                     raise ClientAuthenticationError(
-                        f"Azure Identity failed and no connection key available. "
-                        f"Error: {e}. Please either:\n"
-                        f"1. Fix managed identity configuration, or\n"
-                        f"2. Set COSMOS_KEY environment variable"
+                        f"Azure Identity authentication failed in production environment. "
+                        f"Connection key fallback is disabled for security. "
+                        f"Error: {e}. Please fix Azure Identity configuration:\n"
+                        f"1. Ensure Managed Identity is enabled on your Azure resource\n"
+                        f"2. Grant proper Cosmos DB permissions to the Managed Identity\n"
+                        f"3. Verify RBAC is configured correctly"
                     )
         else:
             # Use provided credential

@@ -24,15 +24,18 @@ class AzureCredentials(Exception):
     @staticmethod
     def get_credential():
         """
-        Get Azure credentials with fallback options optimized for production.
-        Tries multiple authentication methods in order of preference:
-        1. Managed Identity (for Azure-hosted applications - production)
-        2. Environment variables (for CI/CD and explicit service principal auth)
-        3. DefaultAzureCredential (includes Azure CLI, VS Code, etc. - development)
+        Get Azure credentials with environment-aware fallback options.
+        Authentication order depends on ENVIRONMENT variable:
+        - development/local: CLI auth first, then managed identity
+        - production/azure: Managed identity first, then others
         """
         import logging
         import os
         logger = logging.getLogger(__name__)
+        
+        # Check environment setting
+        environment = os.getenv("ENVIRONMENT", "production").lower()
+        logger.info(f"🌍 Environment detected: {environment}")
         
         # Validate CosmosDB endpoint if provided
         cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
@@ -46,42 +49,46 @@ class AzureCredentials(Exception):
             else:
                 logger.info(f"✅ CosmosDB endpoint validation passed: {result}")
         
-        # First, try Managed Identity (best for production Azure environments)
-        try:
-            credential = ManagedIdentityCredential()
-            # Test the credential with a shorter timeout for faster fallback
-            token = credential.get_token("https://cosmos.azure.com/.default", timeout=10)
-            logger.info("✅ Successfully authenticated using Managed Identity")
-            return credential
-        except Exception as e:
-            logger.warning(f"⚠ ManagedIdentityCredential failed: {e}")
+        # Define authentication methods based on environment
+        if environment in ["development", "local", "dev"]:
+            logger.info("🔧 Using development authentication order")
+            auth_methods = [
+                ("Azure CLI/DefaultAzureCredential", lambda: DefaultAzureCredential(
+                    exclude_managed_identity_credential=True,  # Skip managed identity in dev
+                    exclude_visual_studio_code_credential=False,
+                    exclude_environment_credential=False,
+                    exclude_azure_cli_credential=False,
+                    exclude_interactive_browser_credential=True
+                )),
+                ("Environment Credential", EnvironmentCredential),
+                ("Managed Identity", ManagedIdentityCredential)  # Last resort in dev
+            ]
+        else:
+            logger.info("🚀 Using production authentication order")
+            auth_methods = [
+                ("Managed Identity", ManagedIdentityCredential),
+                ("Environment Credential", EnvironmentCredential),
+                ("Azure CLI/DefaultAzureCredential", lambda: DefaultAzureCredential(
+                    exclude_managed_identity_credential=True,  # Already tried above
+                    exclude_visual_studio_code_credential=False,
+                    exclude_environment_credential=True,  # Already tried above
+                    exclude_azure_cli_credential=False,
+                    exclude_interactive_browser_credential=True
+                ))
+            ]
         
-        # Second, try Environment Variables (for explicit service principal configuration)
-        try:
-            credential = EnvironmentCredential()
-            # Test the credential
-            token = credential.get_token("https://cosmos.azure.com/.default", timeout=10)
-            logger.info("✅ Successfully authenticated using Environment Credential")
-            return credential
-        except Exception as e:
-            logger.warning(f"⚠ EnvironmentCredential failed: {e}")
-        
-        # Third, try DefaultAzureCredential (includes CLI, VS Code, etc.)
-        try:
-            # Exclude managed identity here since we already tried it explicitly above
-            credential = DefaultAzureCredential(
-                exclude_managed_identity_credential=True,  # Already tried above
-                exclude_visual_studio_code_credential=False,
-                exclude_environment_credential=True,  # Already tried above
-                exclude_azure_cli_credential=False,
-                exclude_interactive_browser_credential=True  # Not suitable for production
-            )
-            # Test the credential
-            token = credential.get_token("https://cosmos.azure.com/.default", timeout=15)
-            logger.info("✅ Successfully authenticated using DefaultAzureCredential")
-            return credential
-        except Exception as e:
-            logger.warning(f"⚠ DefaultAzureCredential failed: {e}")
+        # Try each authentication method
+        for method_name, credential_factory in auth_methods:
+            try:
+                logger.info(f"🔑 Trying {method_name}...")
+                credential = credential_factory()
+                # Test the credential with appropriate timeout
+                timeout = 5 if method_name == "Managed Identity" and environment in ["development", "local", "dev"] else 15
+                token = credential.get_token("https://cosmos.azure.com/.default", timeout=timeout)
+                logger.info(f"✅ Successfully authenticated using {method_name}")
+                return credential
+            except Exception as e:
+                logger.warning(f"⚠ {method_name} failed: {e}")
             
         # Provide detailed troubleshooting information
         error_msg = """

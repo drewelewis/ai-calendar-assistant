@@ -1,0 +1,30 @@
+# Azure Developer CLI (azd) configuration for AI Calendar Assistant
+# This file enables deployment of the entire solution with 'azd up'
+
+name: ai-calendar-assistant
+metadata:
+  template: ai-calendar-assistant@0.0.1-beta
+
+# Services to deploy
+services:
+  ai-calendar-assistant:
+    project: .
+    language: python
+    host: containerapp
+
+# Infrastructure configuration
+infra:
+  provider: bicep
+  path: infra
+
+# Hooks for custom actions
+hooks:
+  postdeploy:
+    windows:
+      - echo "Deployment completed successfully!"
+      - echo "Container App URL: ${{AZURE_CONTAINER_APP_ENDPOINT}}"
+      - echo "Application Insights: ${{AZURE_APPLICATION_INSIGHTS_NAME}}"
+    posix:
+      - echo "Deployment completed successfully!"
+      - echo "Container App URL: ${{AZURE_CONTAINER_APP_ENDPOINT}}"
+      - echo "Application Insights: ${{AZURE_APPLICATION_INSIGHTS_NAME}}"
