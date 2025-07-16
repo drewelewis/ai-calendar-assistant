@@ -236,3 +236,33 @@ Potential improvements:
 2. **Budget Enforcement**: Add spending limits and automatic throttling
 3. **Usage Analytics**: Dashboard showing usage patterns and optimization opportunities
 4. **Model Recommendation**: Suggest optimal models based on usage patterns
+
+## Console Output for Production Monitoring
+
+The token tracking system now includes smart console output that can be configured for production environments without code changes. See `CONSOLE_OUTPUT.md` for full configuration details.
+
+### Quick Start
+
+Set environment variables to control console output:
+
+```bash
+# Production settings (errors and warnings only)
+TELEMETRY_CONSOLE_ENABLED=true
+TELEMETRY_CONSOLE_LEVEL=WARNING
+TELEMETRY_CONSOLE_COLORS=false
+
+# Development settings (detailed output)
+TELEMETRY_CONSOLE_ENABLED=true
+TELEMETRY_CONSOLE_LEVEL=DEBUG
+TELEMETRY_CONSOLE_COLORS=true
+```
+
+### Sample Console Output
+
+```
+[14:23:15.123] INFO  📊 TOKEN_USAGE: model=gpt-4o operation=chat input_tokens=245 output_tokens=89 total_tokens=334 estimated_cost=$0.0053
+[14:23:15.001] INFO  🤖 OPENAI_CALL: model=gpt-4o operation=chat_completion
+[14:23:14.998] INFO  💬 CHAT_REQUEST: session_id=session-123 message_length=45
+```
+
+This provides real-time visibility into token usage and costs without requiring log aggregation tools.

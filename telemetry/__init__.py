@@ -19,6 +19,18 @@ from .decorators import (
     log_with_trace
 )
 
+from .console_output import (
+    console_info,
+    console_debug,
+    console_warning,
+    console_error,
+    console_telemetry_event,
+    console_token_usage,
+    console_span_start,
+    console_span_end,
+    get_telemetry_console
+)
+
 from .token_tracking import (
     track_openai_tokens,
     add_token_span_attributes,

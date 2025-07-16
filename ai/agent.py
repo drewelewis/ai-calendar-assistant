@@ -25,6 +25,7 @@ from prompts.graph_prompts import prompts
 from telemetry.config import initialize_telemetry, get_telemetry
 from telemetry.decorators import trace_async_method, measure_performance, TelemetryContext
 from telemetry.token_tracking import add_token_span_attributes, record_token_metrics
+from telemetry.console_output import console_info, console_debug, console_telemetry_event
  
 load_dotenv(override=True)
 
@@ -170,6 +171,13 @@ class Agent:
         # Log the incoming request
         self.logger.info(f"Processing chat request for session: {self.session_id}")
         
+        # Console output for chat request
+        console_telemetry_event("chat_request", {
+            "session_id": self.session_id,
+            "message_length": len(message),
+            "has_cosmosdb": self.cosmos_manager is not None
+        }, "agent")
+        
         # Create or hydrate thread based on CosmosDB availability
         with TelemetryContext(operation="thread_creation", session_id=self.session_id):
             if self.cosmos_manager:
@@ -257,6 +265,12 @@ class Agent:
 
             # Track the OpenAI API call with token information
             with TelemetryContext(operation="openai_chat_completion", model=self.deployment_name):
+                # Console output for OpenAI call start
+                console_telemetry_event("openai_call", {
+                    "model": self.deployment_name,
+                    "operation": "chat_completion"
+                }, "agent")
+                
                 response = await self.agent.get_response(
                     messages=message,
                     thread=thread

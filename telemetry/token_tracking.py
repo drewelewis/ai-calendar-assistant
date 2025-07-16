@@ -10,6 +10,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .config import get_tracer, get_meter, get_logger
+from .console_output import console_token_usage, console_telemetry_event, console_debug
 
 
 # Token pricing in USD per 1K tokens (approximate values for GPT-4o)
@@ -394,6 +395,15 @@ def add_token_span_attributes(response, model_name: str = None):
         )
         current_span.set_attribute("openai.cost.estimated_usd", estimated_cost)
         current_span.set_attribute("openai.cost.estimated_cents", estimated_cost * 100)
+        
+        # Console output for token usage
+        console_token_usage(
+            model=model_name,
+            input_tokens=token_usage["prompt_tokens"],
+            output_tokens=token_usage["completion_tokens"],
+            total_cost=estimated_cost,
+            operation="openai_call"
+        )
 
 
 def record_token_metrics(response, model_name: str, operation: str = "unknown"):
@@ -431,3 +441,13 @@ def record_token_metrics(response, model_name: str, operation: str = "unknown"):
     # Record cost metrics
     cost_counter = meter.create_counter("openai_token_cost_total", "Total estimated cost", "usd_cents")
     cost_counter.add(estimated_cost * 100, attributes)
+    
+    # Console output for metrics recording
+    console_telemetry_event("token_metrics", {
+        "model": model_name,
+        "operation": operation,
+        "total_tokens": token_usage["total_tokens"],
+        "input_tokens": token_usage["prompt_tokens"],
+        "output_tokens": token_usage["completion_tokens"],
+        "estimated_cost": estimated_cost
+    })

@@ -9,6 +9,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .config import get_tracer, get_meter, get_logger
+from .console_output import console_span_start, console_span_end, console_telemetry_event
 
 
 def trace_async_method(operation_name: Optional[str] = None, 
@@ -30,8 +31,17 @@ def trace_async_method(operation_name: Optional[str] = None,
                 return await func(*args, **kwargs)
             
             span_name = operation_name or f"{func.__module__}.{func.__name__}"
+            start_time = time.time()
             
             with tracer.start_as_current_span(span_name) as span:
+                # Console output for span start
+                span_attrs = {"module": func.__module__}
+                if include_args and args:
+                    span_attrs["args_count"] = len(args)
+                if include_args and kwargs:
+                    span_attrs["kwargs_count"] = len(kwargs)
+                console_span_start(span_name, span_attrs)
+                
                 # Add function metadata
                 span.set_attribute("function.name", func.__name__)
                 span.set_attribute("function.module", func.__module__)
@@ -51,6 +61,7 @@ def trace_async_method(operation_name: Optional[str] = None,
                 
                 try:
                     result = await func(*args, **kwargs)
+                    duration_ms = (time.time() - start_time) * 1000
                     
                     # Add result if requested
                     if include_result and result is not None:
@@ -59,12 +70,19 @@ def trace_async_method(operation_name: Optional[str] = None,
                             span.set_attribute("result.value", str(result)[:100])
                     
                     span.set_status(Status(StatusCode.OK))
+                    
+                    # Console output for span end
+                    console_span_end(span_name, duration_ms, "OK")
                     return result
                 
                 except Exception as e:
+                    duration_ms = (time.time() - start_time) * 1000
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     span.set_attribute("error.type", type(e).__name__)
                     span.set_attribute("error.message", str(e))
+                    
+                    # Console output for span end with error
+                    console_span_end(span_name, duration_ms, "ERROR", {"error": type(e).__name__})
                     raise
         
         return wrapper

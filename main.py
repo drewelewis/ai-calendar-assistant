@@ -8,6 +8,7 @@ load_dotenv()
 
 # Initialize telemetry early
 from telemetry.config import initialize_telemetry, get_logger
+from telemetry.console_output import console_info, console_warning, console_error
 
 if __name__ == "__main__":
     # Initialize OpenTelemetry
@@ -24,8 +25,9 @@ if __name__ == "__main__":
     if telemetry_success:
         logger = get_logger()
         logger.info(f"Starting {service_name} v{service_version}")
+        console_info(f"Starting {service_name} v{service_version}")
     else:
-        print(f"⚠️ Telemetry initialization failed, continuing without telemetry")
+        console_warning("Telemetry initialization failed, continuing without telemetry")
     
     try:
         import uvicorn
@@ -36,8 +38,7 @@ if __name__ == "__main__":
             log_level="debug",
             reload=False,)
     except Exception as e:
-        print("Unable to start the uvicorn server")
-        print(e)
+        console_error(f"Unable to start the uvicorn server: {e}")
         if telemetry_success:
             logger = get_logger()
             logger.error(f"Failed to start uvicorn server: {e}")

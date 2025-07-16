@@ -14,6 +14,8 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
 
+from .console_output import console_info, console_warning, console_error, console_debug
+
 
 class TelemetryConfig:
     """
@@ -50,11 +52,11 @@ class TelemetryConfig:
         """
         try:
             if not self.connection_string:
-                print("⚠️  No Application Insights connection string found")
-                print("   Set APPLICATIONINSIGHTS_CONNECTION_STRING environment variable")
+                console_warning("No Application Insights connection string found")
+                console_info("Set APPLICATIONINSIGHTS_CONNECTION_STRING environment variable")
                 return False
             
-            print(f"🔧 Configuring telemetry for {self.service_name} v{self.service_version}")
+            console_info(f"Configuring telemetry for {self.service_name} v{self.service_version}")
             
             # Configure Azure Monitor with automatic setup
             configure_azure_monitor(
@@ -72,11 +74,11 @@ class TelemetryConfig:
             self._configure_application_logging()
             
             self.is_configured = True
-            print("✅ Telemetry configuration completed successfully")
+            console_info("Telemetry configuration completed successfully")
             return True
             
         except Exception as e:
-            print(f"❌ Failed to configure telemetry: {e}")
+            console_error(f"Failed to configure telemetry: {e}")
             return False
     
     def _configure_auto_instrumentation(self):
@@ -93,14 +95,14 @@ class TelemetryConfig:
             try:
                 from .semantic_kernel_instrumentation import instrument_semantic_kernel
                 instrument_semantic_kernel()
-                print("✅ Semantic Kernel OpenAI instrumentation enabled")
+                console_info("Semantic Kernel OpenAI instrumentation enabled")
             except Exception as e:
-                print(f"⚠ Warning: Could not instrument Semantic Kernel: {e}")
+                console_warning(f"Could not instrument Semantic Kernel: {e}")
             
-            print("✅ Auto-instrumentation configured")
+            console_debug("Auto-instrumentation configured")
             
         except Exception as e:
-            print(f"⚠ Warning: Some auto-instrumentation failed: {e}")
+            console_warning(f"Some auto-instrumentation failed: {e}")
     
     def _configure_application_logging(self):
         """Configure structured application logging."""
@@ -196,7 +198,7 @@ def initialize_telemetry(service_name: str = "ai-calendar-assistant",
     global _telemetry_config
     
     if _telemetry_config is not None:
-        print("✅ Telemetry already initialized")
+        console_debug("Telemetry already initialized")
         return _telemetry_config.is_configured
     
     _telemetry_config = TelemetryConfig(service_name, service_version, log_level)
