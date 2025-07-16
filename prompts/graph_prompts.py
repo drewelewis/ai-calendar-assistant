@@ -5,10 +5,40 @@ class M365Prompts:
     """
     A class to store and manage all prompts used in the calendar assistant.
     """
+
+    # System messages define the role, tone, and behavior of the assistant (e.g., "You are a helpful assistant").
+    # Instructions (or user prompts) define the task or goal (e.g., "Summarize this article in 3 bullet points").
+
     def __init__(self):
         # Example prompts, add or modify as needed
         self._current_datetime_prompt = f'The current datetime is: {datetime.now().isoformat()}'
-        self._master_prompt = (
+        self._system_prompt = (
+            """
+                SYSTEM INSTRUCTIONS:
+                You are an AI assistant specialized in Microsoft 365 calendar management and meeting scheduling.
+                
+                BEHAVIOR:
+                - Be professional, helpful, and efficient
+                - Always confirm actions before executing them
+                - Provide clear explanations of what you're doing
+                - Be patient and guide users through complex scheduling scenarios
+                - If you encounter errors, explain them clearly and suggest solutions
+                
+                CAPABILITIES:
+                - Access Microsoft Graph API for calendar and user data
+                - Schedule, update, cancel, and query meetings
+                - Find available meeting times across multiple attendees
+                - Search for users by department, role, or team
+                - Manage calendar permissions and sharing
+                
+                LIMITATIONS:
+                - Cannot access external calendars outside the organization
+                - Cannot modify system-level calendar settings
+                - Cannot access personal information beyond what's necessary for scheduling
+                
+                """.strip()
+        )
+        self._instructions = (
             """ 
                 OVERVIEW:
                 You are a meeting scheduling assistant.
@@ -48,12 +78,36 @@ class M365Prompts:
         )
 
 
-    def master_prompt(self, session_id: str):
-        prompt=self.login_prompt(session_id) + "\n" + self._current_datetime_prompt + "\n" + self._master_prompt
-        return prompt
+    def instructions(self, session_id: str):
+        """Returns the task-specific instructions for the agent."""
+        return self._instructions + f"\n\nThe current logged in user_id is: {session_id}\n" 
 
-    def login_prompt(self,session_id: str):
+    def system_message(self, session_id: str):
+        """Returns just the system message for chat completion."""
+        return self._system_prompt
+
+    def login_prompt(self, session_id: str):
+        """Returns the login prompt with session ID."""
         return f'The current logged in user_id is: {session_id}'
+
+    def current_datetime_prompt(self):
+        """Returns the current datetime prompt."""
+        return self._current_datetime_prompt
+
+    def system_prompt(self):
+        """Returns just the system prompt."""
+        return self._system_prompt
+
+    def build_complete_instructions(self, session_id: str):
+        """Build the complete instruction set for the agent."""
+        return (
+            f"{self._system_prompt}\n"
+            f"{self.login_prompt(session_id)}\n"
+            f"{self.current_datetime_prompt()}\n\n"
+            f"{self._instructions}"
+        )
+
+
 
     # Add more methods or prompts as needed
 
