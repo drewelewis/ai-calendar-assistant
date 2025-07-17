@@ -50,7 +50,7 @@ class GraphPlugin:
                 # Create payload with correct structure - user_id (snake_case) and message
                 payload = {
                     "user_id": self.session_id,
-                    "message": f"🔄 {message}"
+                    "message": message
                 }
                 
                 # Add telemetry context for Teams messaging

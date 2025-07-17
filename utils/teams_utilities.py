@@ -44,7 +44,7 @@ class TeamsUtilities:
         # Create payload with correct structure
         payload = {
             "user_id": user_id,
-            "message": message_data.get("text", "")
+            "message": message_data.get("message", "")
         }
         # Fire-and-forget: do not await the response
         asyncio.create_task(self._async_post(self.direct_message_url, payload))
