@@ -83,11 +83,7 @@ class GraphOperations:
         Returns:
             bool: True if user appears to have mailbox properties, False otherwise
         """
-        # Check if user account is enabled
-        if hasattr(user, 'account_enabled') and not user.account_enabled:
-            return False
-            
-        # Check if user has mail property (indicates Exchange mailbox assignment)
+        # Only check if user has mail property (indicates Exchange mailbox assignment)
         if not hasattr(user, 'mail') or not user.mail:
             return False
             
@@ -313,18 +309,10 @@ class GraphOperations:
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
             
-            # Include accountEnabled in the response fields for filtering
-            response_fields = self.user_response_fields.copy()
-            if "accountEnabled" not in response_fields:
-                response_fields.append("accountEnabled")
-                        
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = response_fields
+            query_params.select = self.user_response_fields
             
-            # Add filter to exclude users without active accounts at the API level
-            if exclude_inactive_mailboxes:
-                # Only filter for active users at API level - mail filtering done client-side
-                query_params.filter = "accountEnabled eq true"
+            # No API-level filtering - rely on validate_user_mailbox for verification
             
             # Limit results for testing
             query_params.top = max_results
@@ -337,11 +325,11 @@ class GraphOperations:
                 users = response.value
                 
                 if exclude_inactive_mailboxes and users:
-                    # Client-side filtering using improved mailbox property validation
+                    # Client-side filtering using mailbox property validation only
                     original_count = len(users)
                     users = [user for user in users if self._has_valid_mailbox_properties(user)]
                     filtered_count = original_count - len(users)
-                    print(f"📊 Retrieved {original_count} users, filtered out {filtered_count} without valid mailbox properties, {len(users)} users remaining")
+                    print(f"📊 Retrieved {original_count} users, filtered out {filtered_count} without mail addresses, {len(users)} users remaining")
                 else:
                     print(f"📊 Retrieved {len(users)} users (no mailbox filtering applied)")
                 
@@ -411,23 +399,12 @@ class GraphOperations:
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
             
-            # Include accountEnabled in the response fields for filtering
-            response_fields = self.user_response_fields.copy()
-            if "accountEnabled" not in response_fields:
-                response_fields.append("accountEnabled")
-            
-            # Build filter combining department and mailbox filtering
-            filters = [f"department eq '{department}'"]
-            
-            if exclude_inactive_mailboxes:
-                # Only filter for active users at API level - mail filtering done client-side
-                filters.append("accountEnabled eq true")
-            
-            query_params.filter = " and ".join(filters)
-            print(f"Applied department + mailbox filter: {query_params.filter}")
+            # Build filter for department only
+            query_params.filter = f"department eq '{department}'"
+            print(f"Applied department filter: {query_params.filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = response_fields
+            query_params.select = self.user_response_fields
             # Limit results for testing
             query_params.top = max_results
             
@@ -441,11 +418,11 @@ class GraphOperations:
                 users = response.value
                 
                 if exclude_inactive_mailboxes and users:
-                    # Client-side filtering using improved mailbox property validation
+                    # Client-side filtering using mailbox property validation only
                     original_count = len(users)
                     users = [user for user in users if self._has_valid_mailbox_properties(user)]
                     filtered_count = original_count - len(users)
-                    print(f"📊 Retrieved {original_count} users from {department}, filtered out {filtered_count} without valid mailbox properties, {len(users)} users remaining")
+                    print(f"📊 Retrieved {original_count} users from {department}, filtered out {filtered_count} without mail addresses, {len(users)} users remaining")
                 else:
                     print(f"📊 Retrieved {len(users)} users from {department} (no mailbox filtering applied)")
                 
@@ -476,26 +453,13 @@ class GraphOperations:
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
             
-            # Include accountEnabled in the response fields for filtering
-            response_fields = self.user_response_fields.copy()
-            if "accountEnabled" not in response_fields:
-                response_fields.append("accountEnabled")
-            
-            # Combine user filter with mailbox filtering
-            filters = []
+            # Use only the provided filter - no additional accountEnabled filtering
             if filter:
-                filters.append(f"({filter})")
-            
-            if exclude_inactive_mailboxes:
-                # Only filter for active users at API level - mail filtering done client-side
-                filters.append("accountEnabled eq true")
-            
-            if filters:
-                query_params.filter = " and ".join(filters)
-                # print(f"Applied combined filter: {query_params.filter}")
+                query_params.filter = filter
+                # print(f"Applied filter: {query_params.filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
-            query_params.select = response_fields
+            query_params.select = self.user_response_fields
             # Limit results for testing
             query_params.top = max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
@@ -507,11 +471,11 @@ class GraphOperations:
                 users = response.value
                 
                 if exclude_inactive_mailboxes and users:
-                    # Client-side filtering using improved mailbox property validation
+                    # Client-side filtering using mailbox property validation only
                     original_count = len(users)
                     users = [user for user in users if self._has_valid_mailbox_properties(user)]
                     filtered_count = original_count - len(users)
-                    print(f"📊 Search returned {original_count} users, filtered out {filtered_count} without valid mailbox properties, {len(users)} users remaining")
+                    print(f"📊 Search returned {original_count} users, filtered out {filtered_count} without mail addresses, {len(users)} users remaining")
                 else:
                     print(f"📊 Search returned {len(users)} users (no mailbox filtering applied)")
                 
