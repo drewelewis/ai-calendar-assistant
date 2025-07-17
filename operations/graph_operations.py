@@ -17,6 +17,14 @@ from msgraph.generated.models.location import Location
 from msgraph.generated.models.attendee import Attendee
 from msgraph.generated.models.email_address import EmailAddress
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, continue without loading .env file
+    pass
+
 class GraphOperations:
     def __init__(self, user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"], calendar_response_fields=["subject", "start", "end", "location", "attendees"]):
         """
@@ -343,9 +351,53 @@ class GraphOperations:
             traceback.print_exc()
             return []
     
-    
+    # Get all conference room resources 
+    async def get_all_conference_rooms(self, max_results) -> List[User]:
+        """
+        Get all conference room resources in the Microsoft 365 tenant.
+        
+        Args:
+            max_results (int): Maximum number of results to return
+            
+        Returns:
+            List[User]: List of User objects representing conference rooms
+        """
+        try:
+            # Configure the request with proper query parameters
+            from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+            query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
+            
+            # Filter for conference rooms (typically have a specific naming convention or email domain)
+            query_params.filter = "startswith(mail, 'room') or startswith(mail, 'conf')"
+            
+            # Select specific fields to reduce response size and ensure we get what we need
+            query_params.select = self.user_response_fields
+            
+            # Limit results for testing
+            query_params.top = max_results
+            request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params
+            )
+            response = await self._get_client().users.get(request_configuration=request_configuration)
+
+            if hasattr(response, 'value'):
+                users = response.value
+                
+                if not users:
+                    print("No conference rooms found")
+                    return []
+                
+                return users
+            else:
+                return []
+            
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_all_conference_rooms: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return []
+        
     # Get all departments
-    # Get all users in the Microsoft 365 Tenant Entra Directory
     async def get_all_departments(self, max_results) -> List[str]:
         try:
             departments = set()  # Use a set to avoid duplicates
@@ -489,6 +541,56 @@ class GraphOperations:
             traceback.print_exc()
             return []
 
+    # Get uses mailbox settings by user ID
+    async def get_user_mailbox_settings_by_user_id(self, user_id: str) -> dict:
+        """
+        Get mailbox settings for a user by user ID.
+        
+        Args:
+            user_id (str): The ID of the user to retrieve mailbox settings for
+            
+        Returns:
+            dict: Mailbox settings as a dictionary, or None if not found
+        """
+        try:
+            mailbox_settings = await self._get_client().users.by_user_id(user_id).mailbox_settings.get()
+            if mailbox_settings:
+                return mailbox_settings.__dict__  # Convert to dict for easier handling
+            else:
+                return None
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_user_mailbox_settings_by_user_id: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return None
+
+
+    # Get user preferences by user ID
+    async def get_user_preferences_by_user_id(self, user_id: str) -> User | None:
+        """
+        Get user preferences by user ID.
+        
+        Args:
+            user_id (str): The ID of the user to retrieve preferences for
+            
+        Returns:
+            User: User object with preferences, or None if not found
+        """
+        try:
+            # Fetch user details
+            user = await self.get_user_by_user_id(user_id)
+            if not user:
+                return None
+            
+            # Return the user object with preferences
+            return user
+            
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_user_preferences_by_user_id: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return None
+        
     # Calendar Operations
     # Get calendar events for a user by user ID with optional date range
     async def get_calendar_events_by_user_id(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> DirectoryObject  | None:
@@ -620,16 +722,65 @@ class GraphOperations:
       
 # # Example usage:
 
-if __name__ == "__main__":
+async def main():
     ops = GraphOperations(
         user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"],
         calendar_response_fields=["id", "subject", "start", "end", "location", "attendees"]
     )
+    # get_all_conference_rooms
+    print(60 * "=")
+    print("Getting all conference rooms in the Microsoft 365 Tenant Entra Directory...")
+    print(60 * "=")
+    conference_rooms = await ops.get_all_conference_rooms(100)
+    if conference_rooms:
+        for room in conference_rooms:
+            print(60 * "=")
+            print(f"ID: {room.id}")
+            print(f"Display Name: {room.display_name}")
+            print(f"User Principal Name: {room.user_principal_name}")
+            print(f"Mail: {room.mail}")
+            print(f"Job Title: {room.job_title}")
+            print(f"Department: {room.department}")
+            print(f"Manager: {room.manager}")
+
+            get_calendar_events = await ops.get_calendar_events_by_user_id(room.id)
+            if get_calendar_events:
+                print(f"Found {len(get_calendar_events)} calendar events for room {room.display_name}")
+                for event in get_calendar_events:
+                    print(f"Event Subject: {event.subject}")
+                    print(f"Start: {event.start.date_time} {event.start.time_zone}")
+                    print(f"End: {event.end.date_time} {event.end.time_zone}")
+                    print(f"Location: {event.location.display_name if event.location else 'No location'}")
+                    print("Attendees:")
+                    for attendee in event.attendees:
+                        print(f"  - {attendee.email_address.address} ({attendee.type})")
+                        
+    else:   
+        print("No conference rooms found.")
+
+            
+
+    # print("Get User Mailbox Settings by User ID")
+    # mailbox_settings = await ops.get_user_mailbox_settings_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
+    # if mailbox_settings:
+    #     for key, value in mailbox_settings.items():
+    #         print(f"{key}: {value}")
+    # print(60 * "=")
+
+    # print("Get User Preferences by User ID")
+    # preferences = await ops.get_user_preferences_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
+    # if preferences:
+    #     for key, value in preferences.__dict__.items():
+    #         print(f"{key}: {value}")
+
+
+    # Example usage for other methods (uncomment as needed):
+    
     # print(60 * "=")
     # print("Get User by User ID")
     # print(60 * "=")
     # user_id = "69149650-b87e-44cf-9413-db5c1a5b6d3f"  # Example user ID
-    # user = asyncio.run(ops.get_user_by_user_id(user_id))
+    # user = await ops.get_user_by_user_id(user_id)
     # print(60 * "=")
     # print(f"ID: {user.id}")
     # print(f"Given Name: {user.given_name}")
@@ -644,7 +795,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting all users in the Microsoft 365 Tenant Entra Directory...")
     # print(60 * "=")
-    # users = asyncio.run(ops.get_all_users(100, exclude_inactive_mailboxes=True))  # Filter out users without mailboxes
+    # users = await ops.get_all_users(100, exclude_inactive_mailboxes=True)  # Filter out users without mailboxes
     # for user in users:
     #     print(60 * "=")
     #     print(f"ID: {user.id}")
@@ -662,7 +813,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting the system administrator's manager...")
     # print(60 * "=")
-    # user = asyncio.run(ops.get_users_manager_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f"))
+    # user = await ops.get_users_manager_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
     # print(60 * "=")
     # print(f"ID: {user.id}")
     # print(f"Given Name: {user.given_name}")
@@ -678,7 +829,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting Prita's (IT Manager) direct reports...")
     # print(60 * "=")
-    # direct_reports = asyncio.run(ops.get_direct_reports_by_user_id("5d6bc6b4-4294-4994-8206-8be6ee865407"))
+    # direct_reports = await ops.get_direct_reports_by_user_id("5d6bc6b4-4294-4994-8206-8be6ee865407")
     # for user in direct_reports:
     #     print(60 * "=")
     #     print(f"ID: {user.id}")
@@ -695,7 +846,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting all departments in the Microsoft 365 Tenant Entra Directory...")
     # print(60 * "=")
-    # departments = asyncio.run(ops.get_all_departments(100))
+    # departments = await ops.get_all_departments(100)
     # print(f"Found {len(departments)} departments:")
     # for dept in departments:
     #     print(f"  - {dept}")
@@ -704,7 +855,7 @@ if __name__ == "__main__":
     # print(60 * "=")
     # print("Getting all users in the Information Technology department...")
     # print(60 * "=")
-    # it_users = asyncio.run(ops.get_users_by_department("Information Technology", 100, exclude_inactive_mailboxes=True))
+    # it_users = await ops.get_users_by_department("Information Technology", 100, exclude_inactive_mailboxes=True)
     # print(f"Found {len(it_users)} users in the Information Technology department:")
     # for user in it_users:
     #    print(f"  - {user.display_name} ({user.user_principal_name})")
@@ -719,7 +870,7 @@ if __name__ == "__main__":
     # start_date = "2025-07-01T00:00:00Z"  # Start of July 2025
     # end_date = "2025-07-31T23:59:59Z"    # End of July 2025
     
-    # events = asyncio.run(ops.get_calendar_events_by_user_id(user_id, start_date, end_date))
+    # events = await ops.get_calendar_events_by_user_id(user_id, start_date, end_date)
     # if events:
     #     for event in events:
     #         print(60 * "=")
@@ -730,4 +881,10 @@ if __name__ == "__main__":
     #         print(f"Attendees: {event.attendees}")
     # else:
     #     print("No events found in the specified date range.")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+
+
 

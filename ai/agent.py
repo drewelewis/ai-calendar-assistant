@@ -20,6 +20,10 @@ from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 
 from plugins.graph_plugin import GraphPlugin
 from prompts.graph_prompts import prompts
+from utils.teams_utilities import TeamsUtilities
+
+# Initialize TeamsUtilities for sending messages
+teams_utils = TeamsUtilities()
 
 # Import telemetry components
 from telemetry.config import initialize_telemetry, get_telemetry
@@ -136,7 +140,7 @@ class Agent:
 
         # 3. Add the Microsoft Graph plugin with optional debug mode
         self.graph_debug = os.getenv("GRAPH_DEBUG", "false").lower() == "true"
-        self.kernel.add_plugin(GraphPlugin(debug=self.graph_debug), plugin_name="graph")
+        self.kernel.add_plugin(GraphPlugin(debug=self.graph_debug, session_id=self.session_id), plugin_name="graph")
         # self.kernel.add_plugin(OpenTablePlugin(), plugin_name="open_table")
        
         # 4. Add Azure OpenAI service to the kernel

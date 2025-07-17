@@ -29,6 +29,7 @@ COPY ./plugins /code/plugins
 COPY ./prompts /code/prompts
 COPY ./storage /code/storage
 COPY ./telemetry /code/telemetry
+COPY ./utils /code/utils
 
 EXPOSE 8989
 EXPOSE 80
