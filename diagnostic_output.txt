@@ -1,0 +1,67 @@
+✅ .env file loaded
+🔍 Azure Maps Connection Diagnostic Tool
+================================================================================
+
+============================================================
+🔍 ENVIRONMENT VARIABLES DIAGNOSTIC
+============================================================
+✅ AZURE_MAPS_SUBSCRIPTION_KEY: test...
+✅ AZURE_MAPS_CLIENT_ID: 11b89b23-5401-42af-bce2-79381ec74ef4
+❌ AZURE_CLIENT_ID: Not set
+❌ AZURE_TENANT_ID: Not set
+❌ AZURE_CLIENT_SECRET: Not set
+✅ TELEMETRY_EXPLICITLY_DISABLED: true
+
+🔑 AUTHENTICATION METHOD:
+   Primary: Subscription Key
+
+============================================================
+🌐 DIRECT API CALL TEST
+============================================================
+🔗 URL: https://atlas.microsoft.com/search/poi/category/json
+🔑 Using subscription key: test ...est 
+⏱️  Making request...
+📊 Response Status: 401
+⏱️  Response Time: 0.174s
+❌ 401 Unauthorized - Invalid subscription key
+   Error details: {
+  "error": {
+    "code": "Unauthorized",
+    "message": "Bearer realm=\"https://atlas.microsoft.com/\", SharedKey realm=\"https://atlas.microsoft.com/\"",
+    "target": "WWW-Authenticate",
+    "details": []
+  }
+}
+
+============================================================
+🔧 AZURE MAPS OPERATIONS TEST
+============================================================
+🚫 Telemetry explicitly disabled via environment variable
+⚡ Skipping telemetry initialization (disabled)
+🔄 Using production fallback implementations
+✅ Azure Maps Operations imported successfully
+2025-07-18T14:31:16.463932 INFO [AzureMaps] Azure Maps Operations initialized (telemetry: disabled)
+📊 Telemetry Status: {'telemetry_available': False, 'telemetry_disabled': True, 'mode': 'production_fast_load', 'startup_time': 'optimized', 'hanging_prevention': 'enabled'}
+
+🔗 Testing connection...
+2025-07-18T14:31:16.464045 INFO [AzureMaps] Starting fast connection test
+2025-07-18T14:31:16.587235 ERROR [AzureMaps] Connection test failed: 401
+
+📋 Connection Test Results:
+   overall_status: failed
+   status_code: 401
+   duration_seconds: 0.123158
+
+============================================================
+📊 DIAGNOSTIC SUMMARY
+============================================================
+Environment Variables: ✅ OK
+Direct API Call: ❌ Failed
+Azure Maps Operations: ❌ Failed
+
+❌ API connection failed - check credentials and network.
+
+💡 RECOMMENDATIONS:
+   1. Verify your Azure Maps subscription is active
+   2. Check if the subscription key has the correct permissions
+   3. Ensure your IP is not blocked by Azure Maps

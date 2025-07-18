@@ -1,28 +1,40 @@
 from datetime import datetime
 import os
 import asyncio
-from typing import List, Optional, Annotated
+from typing import List, Optional, Annotated, Dict, Any
 from semantic_kernel import Kernel
 from semantic_kernel.functions import kernel_function
+
+# Import telemetry components first
+from telemetry.decorators import TelemetryContext
+from telemetry.console_output import console_info, console_debug, console_telemetry_event, console_error, console_warning
 
 # Try to import the real GraphOperations, fallback to mock if it fails
 try:
     from operations.graph_operations import GraphOperations
-    # print("✓ Using real Microsoft Graph Operations")
+    console_info("✓ Using Microsoft Graph Operations", module="GraphPlugin")
 except Exception as e:
-    print(f"⚠ Could not import GraphOperations: {e}")
-    # print("🎭 Falling back to mock GraphOperations for testing")
-    # from operations.mock_graph_operations import GraphOperations
+    console_error(f"⚠ Could not import GraphOperations: {e}", module="GraphPlugin")
+    raise
 
 
-from utils.teams_utilities import TeamsUtilities
-
-# Import telemetry components
-from telemetry.decorators import TelemetryContext
-from telemetry.console_output import console_info, console_debug, console_telemetry_event
-
-# Initialize TeamsUtilities for sending messages
-teams_utils = TeamsUtilities()
+try:
+    from utils.teams_utilities import TeamsUtilities
+    # Initialize TeamsUtilities for sending messages
+    teams_utils = TeamsUtilities()
+    TEAMS_UTILS_AVAILABLE = True
+except ImportError as e:
+    console_error(f"⚠ Teams utilities not available: {e}", module="GraphPlugin")
+    TEAMS_UTILS_AVAILABLE = False
+    
+    # Fallback TeamsUtilities that does nothing
+    class MockTeamsUtilities:
+        def send_friendly_notification(self, message, session_id=None, debug=False):
+            if debug:
+                session_info = f"[session: {session_id}] " if session_id else ""
+                print(f"TEAMS: {session_info}{message}")
+    
+    teams_utils = MockTeamsUtilities()
 
 graph_operations = GraphOperations(
     user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"],
@@ -47,6 +59,7 @@ class GraphPlugin:
         """Send a friendly notification to the user via Teams about what we're working on."""
         teams_utils.send_friendly_notification(message, self.session_id, self.debug)
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Search for users in Microsoft 365 Tenant Entra Directory using flexible filter criteria.
@@ -87,7 +100,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in user_search: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get detailed user preferences and profile information for a specific user by their ID.
@@ -123,7 +138,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_user_preferences_by_user_id: {e}")
             return {}
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get comprehensive mailbox settings and configuration for a specific user.
@@ -162,7 +179,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_user_mailbox_settings_by_user_id: {e}")
             return {}
-        
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get basic user information by their unique ID from Microsoft 365 Directory.
@@ -194,17 +213,93 @@ class GraphPlugin:
         NOTE: Requires the exact user ID (GUID format)
         """
     )
+    @kernel_function(
+        description="""
+        Get basic user information by their unique ID from Microsoft 365 Directory.
         
+        USE THIS WHEN:
+        - You have a specific user ID and need basic profile information
+        - Need to verify a user exists and get their core details
+        - Want basic info without full preferences or mailbox settings
+        - Quick lookup for user validation
+        
+        RETURNS:
+        - Display name and email address
+        - Job title and department
+        - User principal name
+        - Manager information
+        - Basic contact information
+        
+        COMMON USE CASES:
+        - "Get basic info for user ID xyz"
+        - Verifying user exists before other operations
+        - Quick profile lookup
+        - Getting user's name and title for display
+        
+        DIFFERENCE FROM OTHER USER FUNCTIONS:
+        - get_user_by_id: Basic user info (use for quick lookups)
+        - get_user_preferences_by_user_id: Detailed preferences and settings
+        - get_user_mailbox_settings_by_user_id: Mailbox-specific configuration
+        
+        NOTE: Requires the exact user ID (GUID format)
+        """
+    )
     async def get_user_by_id(self, user_id: Annotated[str, "The unique user ID (GUID) of the user to retrieve"]) -> Annotated[dict, "Returns detailed information about the specified user."]:
         self._log_function_call("get_user_by_id", user_id=user_id)
-        self._send_friendly_notification("🔍 Looking up user profile information...")
+        self._send_friendly_notification("🔍 Looking up user profile using their ID information...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         try:
             return await graph_operations.get_user_by_user_id(user_id.strip())
         except Exception as e:
             print(f"Error in get_user_by_id: {e}")
             return {}
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Get basic user information by their email address from Microsoft 365 Directory.
+        
+        USE THIS WHEN:
+        - You have a user's email address and need their profile information
+        - User provides an email address instead of user ID
+        - Need to look up someone by their email
+        - Converting email address to user profile data
+        
+        RETURNS:
+        - Display name and email address
+        - Job title and department
+        - User principal name
+        - Manager information
+        - Basic contact information
+        - User ID (for use with other functions)
+        
+        COMMON USE CASES:
+        - "Get info for john.smith@company.com"
+        - "Look up user by email address"
+        - "Find profile for this email"
+        - Converting email to user details for calendar operations
+        
+        DIFFERENCE FROM OTHER USER FUNCTIONS:
+        - get_user_by_email: Basic user info by email (use when you have email)
+        - get_user_by_id: Basic user info by ID (use when you have user ID)
+        - user_search: Search multiple users with filters
+        
+        NOTE: Requires the exact email address (user@domain.com format)
+        """
+    )
+    async def get_user_by_email(self, email: Annotated[str, "The email address of the user to retrieve"]) -> Annotated[dict, "Returns detailed information about the specified user."]:
+        self._log_function_call("get_user_by_email", email=email)
+        self._send_friendly_notification("📧 Looking up user profile by email address...")
+        if not email or not email.strip(): raise ValueError("Error: email parameter is empty")
+        try:
+            return await graph_operations.get_user_by_email(email.strip())
+        except Exception as e:
+            print(f"Error in get_user_by_email: {e}")
+            return {}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get the manager/supervisor of a specific user from the organizational hierarchy.
@@ -237,7 +332,7 @@ class GraphPlugin:
         NOTE: Returns None if user has no manager assigned or is top-level executive
         """
     )
-    async def get_user_manager(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose manager you want to retrieve"]) -> Annotated[dict, "Returns information about the user's manager."]:
+    async def get_users_manager_by_user_id(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose manager you want to retrieve"]) -> Annotated[dict, "Returns information about the user's manager."]:
         self._log_function_call("get_user_manager", user_id=user_id)
         self._send_friendly_notification("👔 Finding manager information in org chart...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
@@ -246,7 +341,61 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_user_manager: {e}")
             return {}
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Get location details (city, state, and zipcode) for a specific user from their Microsoft 365 profile.
+        
+        USE THIS WHEN:
+        - User asks about someone's location, office, or where they're based
+        - Need geographical information for meeting planning or scheduling
+        - Want to find users in specific cities, states, or regions
+        - Planning logistics for events, meetings, or travel
+        - Determining time zones or regional considerations
+        
+        RETURNS:
+        - City where the user is located
+        - State/province information
+        - Postal/zip code
+        - Complete address components for geographical reference
+        
+        COMMON USE CASES:
+        - "Where is John Smith located?" or "What city is Sarah in?"
+        - "Find the office location for this user"
+        - "What's Mike's address for shipping?"
+        - Planning in-person meetings: "Are we in the same city?"
+        - Regional team organization: "Who's in our Seattle office?"
+        
+        LOCATION-BASED SCENARIOS:
+        - Meeting planning: Choose convenient locations for attendees
+        - Time zone considerations: Schedule across different regions
+        - Regional coordination: Find local team members
+        - Logistics planning: Shipping, travel, or event coordination
+        - Compliance: Data residency or regional requirements
+        
+        INTEGRATION WITH OTHER SERVICES:
+        - Use with Azure Maps plugin to find nearby restaurants/venues
+        - Combine with calendar functions for location-based scheduling
+        - Support travel planning and expense management
+        
+        NOTE: Returns None if location information is not populated in user profile
+        """
+    )
+    async def get_users_city_state_zipcode_by_user_id(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose location details you want to retrieve"]) -> Annotated[dict, "Returns location information (city, state, zipcode) for the specified user."]:
+        self._log_function_call("get_user_location", user_id=user_id)
+        self._send_friendly_notification("📍 Looking up user location details...")
+        if not user_id or not user_id.strip(): 
+            raise ValueError("Error: user_id parameter is empty")
+        try:
+            return await graph_operations.get_users_city_state_zipcode_by_user_id(user_id.strip())
+        except Exception as e:
+            print(f"Error in get_user_location: {e}")
+            return {}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get all direct reports (employees/subordinates) who report directly to a specific user.
@@ -288,7 +437,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_direct_reports: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get all users from the Microsoft 365 organization directory.
@@ -335,7 +486,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_all_users: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get all users from a specific department in the organization.
@@ -372,6 +525,13 @@ class GraphPlugin:
         EXAMPLE DEPARTMENTS:
         - "Information Technology", "Engineering", "Sales", "Marketing"
         - "Human Resources", "Finance", "Operations"
+
+        COMMON ALIASES:
+        - "IT" for "Information Technology"
+        - "HR" for "Human Resources"
+        - "Eng" for "Engineering"
+        - "App Dev" for "Application Development"
+
         
         NOTE: Returns empty list if department name doesn't match exactly
         """
@@ -387,7 +547,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_users_by_department: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get a complete list of all unique departments in the organization.
@@ -439,15 +601,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_all_departments: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
-    @kernel_function(
-        description="""
-        Useful for validating if a user has a valid mailbox before attempting calendar operations.
-        This helps identify users whose mailboxes are inactive, soft-deleted, or hosted on-premise.
-        Returns validation status and helpful diagnostic information.
-        """
-    )
-
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get all conference rooms and meeting spaces available in the organization.
@@ -493,7 +649,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_all_conference_rooms: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get comprehensive details about a specific conference room including capacity and location.
@@ -540,7 +698,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_conference_room_details_by_id: {e}")
             return {}
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get comprehensive conference room usage report showing all rooms and their current bookings/events.
@@ -602,7 +762,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in get_conference_room_events: {e}")
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Validate if a user has a functional mailbox before attempting calendar or email operations.
@@ -656,7 +818,9 @@ class GraphPlugin:
                 'message': f'Error validating user: {e}',
                 'user_info': None
             }
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get calendar events and meetings for a specific user with optional date filtering.
@@ -760,7 +924,9 @@ class GraphPlugin:
                 print("💡 TIP: Verify the user ID exists and the user has an active mailbox")
                 
             return []
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Create a new calendar event/meeting in a user's Microsoft 365 calendar with attendees.
@@ -823,7 +989,9 @@ class GraphPlugin:
         except Exception as e:
             print(f"Error in create_calendar_event: {e}")
             return {}
+    ############################## KERNEL FUNCTION END #######################################
 
+    ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
         Get the current date and time in standardized ISO format for calendar and scheduling operations.
@@ -866,4 +1034,5 @@ class GraphPlugin:
             print(f"Error in get_current_datetime: {e}")
             from datetime import datetime, timezone
             return datetime.now(timezone.utc).isoformat()
+    ############################## KERNEL FUNCTION END #######################################
 

@@ -15,10 +15,23 @@ except Exception as e:
     console_error(f"⚠ Could not import AzureMapsOperations: {e}", module="AzureMapsPlugin")
     raise
 
-from utils.teams_utilities import TeamsUtilities
-
-# Initialize TeamsUtilities for sending messages
-teams_utils = TeamsUtilities()
+try:
+    from utils.teams_utilities import TeamsUtilities
+    # Initialize TeamsUtilities for sending messages
+    teams_utils = TeamsUtilities()
+    TEAMS_UTILS_AVAILABLE = True
+except ImportError as e:
+    console_error(f"⚠ Teams utilities not available: {e}", module="AzureMapsPlugin")
+    TEAMS_UTILS_AVAILABLE = False
+    
+    # Fallback TeamsUtilities that does nothing
+    class MockTeamsUtilities:
+        def send_friendly_notification(self, message, session_id=None, debug=False):
+            if debug:
+                session_info = f"[session: {session_id}] " if session_id else ""
+                print(f"TEAMS: {session_info}{message}")
+    
+    teams_utils = MockTeamsUtilities()
 
 class AzureMapsPlugin:
     """

@@ -78,6 +78,513 @@ graph TB
 | **Directory Agent** | Organizational intelligence | Find users, departments, managers, team structures | Microsoft Graph |
 | **Location Agent** | Location-based services | Find nearby POI, restaurants, coffee shops, directions | Azure Maps |
 
+## 🔌 Plugin Architecture
+
+The AI Calendar Assistant uses a sophisticated plugin system built on Semantic Kernel to provide specialized capabilities. Each plugin is designed as a modular component that can be independently configured and extended.
+
+### 📊 Microsoft Graph Plugin (`plugins/graph_plugin.py`)
+
+**Primary Purpose:** Comprehensive Microsoft 365 integration for calendar, directory, and organizational operations.
+
+#### 🏗️ Core Architecture
+- **Base Class:** `GraphPlugin` 
+- **Authentication:** Azure AD with managed identity support
+- **API Integration:** Microsoft Graph REST API v1.0
+- **Caching:** Intelligent request caching to minimize API calls
+- **Error Handling:** Comprehensive retry logic and graceful degradation
+
+#### 📅 Calendar Operations
+
+**Meeting Management:**
+```python
+@kernel_function
+async def create_meeting(
+    subject: str,
+    start_time: str, 
+    end_time: str,
+    attendees: str,
+    body: str = "",
+    location: str = ""
+) -> str
+```
+- Creates calendar events with automatic attendee validation
+- Handles time zone conversion and conflict detection
+- Supports both in-person and Teams meetings
+- Automatic conference room booking when location specified
+
+**Availability Checking:**
+```python
+@kernel_function  
+async def check_availability(
+    attendees: str,
+    start_time: str,
+    end_time: str
+) -> str
+```
+- Real-time free/busy status for multiple attendees
+- Conflict detection with alternative time suggestions
+- Integration with Exchange calendar data
+- Support for recurring meeting patterns
+
+**Event Management:**
+```python
+@kernel_function
+async def get_calendar_events(
+    start_date: str,
+    end_date: str,
+    attendee_email: str = ""
+) -> str
+```
+- Retrieve calendar events within date ranges
+- Filter by specific attendees or meeting types
+- Include meeting details, locations, and attendee lists
+- Handle recurring events and series exceptions
+
+#### 👥 Directory Operations
+
+**User Discovery:**
+```python
+@kernel_function
+async def find_user_by_name(
+    name: str,
+    limit: int = 10
+) -> str
+```
+- Search organizational directory by partial or full names
+- Fuzzy matching for handling typos and variations
+- Returns contact information, department, and manager details
+- Privacy-aware filtering based on user permissions
+
+**Organizational Structure:**
+```python
+@kernel_function
+async def get_user_manager(
+    user_email: str
+) -> str
+
+@kernel_function  
+async def get_direct_reports(
+    manager_email: str
+) -> str
+```
+- Navigate organizational hierarchies
+- Manager and direct report relationships
+- Department and team structure mapping
+- Support for matrix organizations and dual reporting
+
+**Department Navigation:**
+```python
+@kernel_function
+async def search_department(
+    department_name: str,
+    include_subgroups: bool = True
+) -> str
+```
+- Browse departments and organizational units
+- Include nested team structures
+- Filter by location, function, or business unit
+- Export organizational charts and contact lists
+
+#### 🏢 Conference Room Management
+
+**Room Discovery:**
+```python
+@kernel_function
+async def find_conference_rooms(
+    building: str = "",
+    capacity: int = 0,
+    equipment: str = ""
+) -> str
+```
+- Search available conference rooms by criteria
+- Filter by capacity, location, and equipment
+- Include room features (video conferencing, whiteboards, etc.)
+- Real-time availability checking
+
+**Room Booking:**
+```python
+@kernel_function
+async def book_conference_room(
+    room_email: str,
+    start_time: str,
+    end_time: str,
+    subject: str
+) -> str
+```
+- Direct room reservation integration
+- Automatic conflict resolution
+- Equipment booking (projectors, video systems)
+- Catering and setup request coordination
+
+#### 🔧 Configuration & Authentication
+
+**Authentication Methods:**
+- **Managed Identity:** Preferred for Azure deployments
+- **Service Principal:** Development and testing environments  
+- **Interactive Auth:** Local development scenarios
+- **Certificate-based:** High-security enterprise environments
+
+**Required Microsoft Graph Permissions:**
+```json
+{
+  "Calendar.ReadWrite": "Full calendar access for meeting management",
+  "User.Read.All": "Organization directory reading",
+  "Group.Read.All": "Department and team structure access",
+  "Place.Read.All": "Conference room discovery and booking",
+  "Calendars.ReadWrite.Shared": "Shared calendar access"
+}
+```
+
+### 🗺️ Azure Maps Plugin (`plugins/azure_maps_plugin.py`)
+
+**Primary Purpose:** Comprehensive location intelligence and point-of-interest discovery using Azure Maps services.
+
+#### 🏗️ Core Architecture
+- **Base Class:** `AzureMapsPlugin`
+- **API Integration:** Azure Maps REST API v1.0
+- **Authentication:** Subscription key or managed identity
+- **Global Coverage:** Worldwide location data with local language support
+- **Error Resilience:** Comprehensive fallback and retry mechanisms
+
+#### 📍 Location Search Operations
+
+**Nearby Points of Interest:**
+```python
+@kernel_function
+async def search_nearby_locations(
+    latitude: float,
+    longitude: float, 
+    radius: int = 5000,
+    limit: int = 10,
+    language: str = "en-US"
+) -> str
+```
+- **Capabilities:**
+  - Search within configurable radius (up to 50km)
+  - Return detailed POI information including names, addresses, phone numbers
+  - Distance calculations from search center
+  - Support for 40+ languages and regional preferences
+  - Real-time business hours and operating status
+
+- **Use Cases:**
+  - "Find restaurants near downtown Seattle"
+  - "What's around latitude 47.6062, longitude -122.3321?"
+  - "Show me everything within 2 miles of the conference center"
+
+**Category-Based Search:**
+```python
+@kernel_function
+async def search_by_category(
+    latitude: float,
+    longitude: float,
+    categories: str,
+    radius: int = 5000,
+    limit: int = 10
+) -> str
+```
+- **Supported Categories:**
+  - **Dining:** Restaurants, cafes, bars, fast food, food trucks
+  - **Accommodation:** Hotels, motels, bed & breakfast, vacation rentals
+  - **Transportation:** Gas stations, parking, airports, train stations
+  - **Services:** Banks, ATMs, hospitals, pharmacies, post offices
+  - **Shopping:** Malls, grocery stores, specialty retail
+  - **Entertainment:** Movie theaters, museums, parks, attractions
+
+- **Advanced Features:**
+  - Multiple category filtering in single request
+  - Subcategory refinement (Italian restaurants, luxury hotels)
+  - Business hours integration
+  - Customer rating and review data
+
+**Brand-Specific Search:**
+```python
+@kernel_function
+async def search_by_brand(
+    latitude: float,
+    longitude: float,
+    brands: str,
+    radius: int = 5000,
+    limit: int = 10
+) -> str
+```
+- **Popular Brands Supported:**
+  - **Coffee:** Starbucks, Dunkin', Peet's Coffee, Tim Hortons
+  - **Fast Food:** McDonald's, Burger King, KFC, Subway, Chipotle
+  - **Retail:** Walmart, Target, Costco, Home Depot, Best Buy
+  - **Hotels:** Marriott, Hilton, Holiday Inn, Hampton Inn
+  - **Gas Stations:** Shell, Exxon, BP, Chevron, Texaco
+
+- **Brand Intelligence:**
+  - Franchise location discovery
+  - Brand-specific amenities and services
+  - Loyalty program integration points
+  - Hours and availability by brand standards
+
+**Regional Geographic Search:**
+```python
+@kernel_function
+async def search_by_region(
+    latitude: float,
+    longitude: float,
+    countries: str,
+    radius: int = 10000,
+    limit: int = 10
+) -> str
+```
+- **Geographic Filtering:**
+  - ISO country code support (US, CA, GB, FR, DE, etc.)
+  - Cross-border search control
+  - Regional compliance and data sovereignty
+  - Multi-country search capabilities
+
+- **Use Cases:**
+  - Border area searches with country preferences
+  - International travel planning
+  - Regulatory compliance (EU vs non-EU results)
+  - Cultural and language-specific results
+
+#### 📊 POI Category Discovery
+
+**Available Categories Endpoint:**
+```python
+@kernel_function
+async def get_available_categories() -> str
+```
+- **Category Information:**
+  - Complete list of searchable POI categories
+  - Category descriptions and examples
+  - Subcategory hierarchies
+  - Regional availability by category
+
+- **Category Organization:**
+  - **Food & Dining:** 50+ restaurant and food service types
+  - **Accommodation:** Hotels, lodging, and temporary stays
+  - **Transportation:** All transport-related services and infrastructure
+  - **Services:** Professional, medical, financial, and public services
+  - **Shopping & Retail:** Commercial and retail establishments
+  - **Entertainment & Recreation:** Leisure and entertainment venues
+
+#### 🌍 Global Coverage & Localization
+
+**Supported Regions:**
+- **North America:** United States, Canada, Mexico
+- **Europe:** All EU countries plus UK, Norway, Switzerland
+- **Asia Pacific:** Japan, Australia, South Korea, Singapore
+- **Additional:** 190+ countries with varying detail levels
+
+**Language Support:**
+- **Primary:** English, Spanish, French, German, Italian, Portuguese
+- **Asian Languages:** Japanese, Korean, Chinese (Simplified/Traditional)
+- **Regional:** Local languages based on search location
+- **Automatic Detection:** Location-based language preference
+
+#### 🔧 Configuration & Authentication
+
+**Authentication Options:**
+```bash
+# Subscription Key (recommended for development)
+AZURE_MAPS_SUBSCRIPTION_KEY=your-subscription-key
+
+# Managed Identity (recommended for production)
+AZURE_MAPS_CLIENT_ID=your-managed-identity-client-id
+```
+
+**Performance Optimizations:**
+- **Request Caching:** Intelligent caching to reduce API calls
+- **Batch Processing:** Multiple queries in single requests where possible
+- **Connection Pooling:** Persistent HTTP connections for better performance
+- **Rate Limiting:** Built-in throttling to respect API limits
+
+#### 🚨 Error Handling & Resilience
+
+**Comprehensive Error Management:**
+- **Network Issues:** Automatic retry with exponential backoff
+- **API Quotas:** Graceful degradation when limits reached
+- **Invalid Coordinates:** Input validation and error messaging
+- **Service Unavailability:** Fallback responses and user guidance
+- **Partial Results:** Handle incomplete data gracefully
+
+**Fallback Strategies:**
+- **Cache First:** Return cached results when service unavailable
+- **Simplified Responses:** Basic location info when detailed data fails
+- **User Guidance:** Clear error messages with suggested alternatives
+- **Telemetry:** Comprehensive logging for debugging and monitoring
+
+#### 🎯 Integration Examples
+
+**Meeting Location Planning:**
+```python
+# Find nearby restaurants for lunch meeting
+locations = await maps_plugin.search_by_category(
+    latitude=office_lat,
+    longitude=office_lng, 
+    categories="restaurant",
+    radius=1000
+)
+
+# Find specific coffee shop for informal meeting
+coffee = await maps_plugin.search_by_brand(
+    latitude=meeting_lat,
+    longitude=meeting_lng,
+    brands="starbucks,peets coffee"
+)
+```
+
+**Travel and Event Planning:**
+```python
+# Find hotels near conference venue
+hotels = await maps_plugin.search_by_category(
+    latitude=venue_lat,
+    longitude=venue_lng,
+    categories="hotel",
+    radius=5000
+)
+
+# Regional search for international events
+venues = await maps_plugin.search_by_region(
+    latitude=border_lat,
+    longitude=border_lng,
+    countries="US,CA",
+    radius=20000
+)
+```
+
+## 🔌 Plugin Development Guide
+
+### Creating Custom Plugins
+
+The AI Calendar Assistant supports custom plugin development following the Semantic Kernel plugin architecture:
+
+#### 1. Basic Plugin Structure
+```python
+from semantic_kernel.functions import kernel_function
+from typing import Annotated
+
+class CustomPlugin:
+    """
+    Custom plugin for specific business requirements.
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {}
+        
+    @kernel_function(
+        description="Detailed description of what this function does"
+    )
+    async def custom_function(
+        self,
+        parameter1: Annotated[str, "Description of parameter1"],
+        parameter2: Annotated[int, "Description of parameter2"] = 10
+    ) -> str:
+        """
+        Implementation of custom functionality.
+        
+        Args:
+            parameter1: First parameter description
+            parameter2: Second parameter with default value
+            
+        Returns:
+            String response formatted for AI consumption
+        """
+        # Implementation here
+        return "Formatted response for the AI agent"
+```
+
+#### 2. Plugin Registration
+```python
+# In your agent initialization code
+from plugins.custom_plugin import CustomPlugin
+
+# Register plugin with the kernel
+custom_plugin = CustomPlugin(config=your_config)
+kernel.add_plugin(custom_plugin, plugin_name="CustomPlugin")
+```
+
+#### 3. Best Practices for Plugin Development
+
+**Function Design:**
+- Use clear, descriptive function names and descriptions
+- Include detailed parameter annotations with type hints
+- Return formatted strings optimized for AI consumption
+- Handle errors gracefully with user-friendly messages
+
+**Error Handling:**
+- Always include try/catch blocks for external API calls
+- Provide meaningful error messages that help users understand issues
+- Implement fallback behavior when possible
+- Log errors for debugging and monitoring
+
+**Performance:**
+- Cache frequently accessed data
+- Use async/await for all I/O operations
+- Implement request batching for APIs that support it
+- Add appropriate timeouts for external calls
+
+**Security:**
+- Validate all input parameters
+- Use secure authentication methods (managed identity preferred)
+- Avoid logging sensitive information
+- Implement proper access controls
+
+### Plugin Integration Examples
+
+#### Enterprise Directory Plugin
+```python
+class EnterpriseDirectoryPlugin:
+    """Extended directory capabilities for enterprise environments."""
+    
+    @kernel_function(
+        description="Find users by role, department, or skill set"
+    )
+    async def find_experts(
+        self,
+        skill: Annotated[str, "Skill or expertise area to search for"],
+        department: Annotated[str, "Optional department filter"] = ""
+    ) -> str:
+        # Implementation for expert discovery
+        pass
+        
+    @kernel_function(
+        description="Get organizational chart with reporting relationships"
+    )
+    async def get_org_chart(
+        self,
+        root_user: Annotated[str, "Starting point for org chart"],
+        depth: Annotated[int, "Levels to include (default: 3)"] = 3
+    ) -> str:
+        # Implementation for org chart generation
+        pass
+```
+
+#### Custom Location Services Plugin
+```python
+class CustomLocationPlugin:
+    """Extended location services for specific business needs."""
+    
+    @kernel_function(
+        description="Find company offices and facilities"
+    )
+    async def find_company_locations(
+        self,
+        city: Annotated[str, "City to search in"],
+        facility_type: Annotated[str, "Type of facility (office, warehouse, etc.)"] = ""
+    ) -> str:
+        # Implementation for company location discovery
+        pass
+        
+    @kernel_function(
+        description="Calculate travel time between locations"
+    )
+    async def calculate_travel_time(
+        self,
+        origin: Annotated[str, "Starting location"],
+        destination: Annotated[str, "Destination location"],
+        transport_mode: Annotated[str, "driving, walking, transit"] = "driving"
+    ) -> str:
+        # Implementation for travel time calculation
+        pass
+```
+
 ## ✨ Key Features
 
 ### 🗣️ Intelligent Multi-Agent Conversations

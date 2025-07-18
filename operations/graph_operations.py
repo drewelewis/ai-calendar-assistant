@@ -1,8 +1,15 @@
-from datetime import datetime
 import os
+
+# CRITICAL: Check telemetry disable flag BEFORE any other imports
+TELEMETRY_EXPLICITLY_DISABLED = os.environ.get('TELEMETRY_EXPLICITLY_DISABLED', '').lower() in ('true', '1', 'yes')
+
+if TELEMETRY_EXPLICITLY_DISABLED:
+    print("🚫 Telemetry explicitly disabled via environment variable")
+
+from datetime import datetime
 import traceback
 import asyncio
-from typing import List
+from typing import List, Dict, Optional, Any
 from azure.identity import ClientSecretCredential
 from msgraph import GraphServiceClient
 import msgraph
@@ -24,6 +31,191 @@ try:
 except ImportError:
     # python-dotenv not installed, continue without loading .env file
     pass
+
+# Production-grade telemetry import with timeout and graceful fallback
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+TELEMETRY_AVAILABLE = False
+TELEMETRY_IMPORT_TIMEOUT = 5  # Reduced timeout for faster feedback
+
+def _safe_import_telemetry():
+    """
+    Safely import telemetry components with timeout to prevent hanging.
+    Uses threading to avoid blocking the main application.
+    """
+    global TELEMETRY_AVAILABLE
+    
+    try:
+        # Check if telemetry is explicitly disabled FIRST
+        if TELEMETRY_EXPLICITLY_DISABLED:
+            print("🚫 Telemetry disabled - skipping import")
+            return False
+            
+        print(f"🔄 Attempting telemetry import with {TELEMETRY_IMPORT_TIMEOUT}s timeout...")
+        
+        # Use ThreadPoolExecutor to import with timeout
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_import_telemetry_modules)
+            try:
+                # Wait for import with timeout
+                return future.result(timeout=TELEMETRY_IMPORT_TIMEOUT)
+            except FutureTimeoutError:
+                print(f"⏰ Telemetry import timed out after {TELEMETRY_IMPORT_TIMEOUT} seconds")
+                print("🔄 Continuing with fallback implementations")
+                return False
+            except Exception as e:
+                print(f"⚠️  Telemetry import failed: {e}")
+                print("🔄 Using fallback implementations")
+                return False
+                
+    except Exception as e:
+        print(f"⚠️  Error during telemetry import process: {e}")
+        return False
+
+def _import_telemetry_modules():
+    """
+    Internal function to import telemetry modules.
+    This runs in a separate thread to enable timeout handling.
+    """
+    try:
+        print("📦 Importing telemetry modules...")
+        
+        from telemetry import (
+            trace_async_method,
+            measure_performance,
+            get_tracer,
+            get_meter,
+            get_logger
+        )
+        
+        from telemetry.console_output import (
+            console_info,
+            console_debug,
+            console_warning,
+            console_error,
+            console_telemetry_event
+        )
+        
+        # Store in global namespace for main thread access
+        globals().update({
+            'trace_async_method': trace_async_method,
+            'measure_performance': measure_performance,
+            'get_tracer': get_tracer,
+            'get_meter': get_meter,
+            'get_logger': get_logger,
+            'console_info': console_info,
+            'console_debug': console_debug,
+            'console_warning': console_warning,
+            'console_error': console_error,
+            'console_telemetry_event': console_telemetry_event
+        })
+        
+        print("✅ Telemetry components loaded successfully")
+        return True
+        
+    except ImportError as e:
+        print(f"📦 Telemetry modules not available: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Unexpected error importing telemetry: {e}")
+        return False
+
+# Attempt telemetry import with timeout protection ONLY if not disabled
+if not TELEMETRY_EXPLICITLY_DISABLED:
+    print("🔄 Initializing telemetry components...")
+    TELEMETRY_AVAILABLE = _safe_import_telemetry()
+else:
+    print("⚡ Skipping telemetry initialization (disabled)")
+    TELEMETRY_AVAILABLE = False
+
+# Production-grade fallback implementations
+if not TELEMETRY_AVAILABLE:
+    print("🔄 Using production fallback implementations")
+    
+    def trace_async_method(name, include_args=False):
+        """Production fallback decorator that preserves function behavior."""
+        def decorator(func):
+            async def wrapper(*args, **kwargs):
+                # In production, could log to standard logging system
+                start_time = time.time()
+                try:
+                    result = await func(*args, **kwargs)
+                    duration = time.time() - start_time
+                    if os.environ.get('DEBUG_GRAPH_OPERATIONS', '').lower() in ('true', '1'):
+                        print(f"TRACE: {name} completed in {duration:.3f}s")
+                    return result
+                except Exception as e:
+                    duration = time.time() - start_time
+                    print(f"TRACE: {name} failed after {duration:.3f}s - {e}")
+                    raise
+            return wrapper
+        return decorator
+    
+    def measure_performance(name):
+        """Production fallback decorator for performance measurement."""
+        def decorator(func):
+            async def wrapper(*args, **kwargs):
+                start_time = time.time()
+                try:
+                    result = await func(*args, **kwargs)
+                    duration = time.time() - start_time
+                    if duration > 5.0:  # Log slow operations
+                        print(f"PERF: {name} took {duration:.3f}s (slow operation)")
+                    return result
+                except Exception as e:
+                    duration = time.time() - start_time
+                    print(f"PERF: {name} failed after {duration:.3f}s")
+                    raise
+            return wrapper
+        return decorator
+    
+    def get_tracer():
+        """Production fallback tracer."""
+        return None
+    
+    def get_meter():
+        """Production fallback meter."""
+        return None
+    
+    def get_logger():
+        """Production fallback logger."""
+        import logging
+        return logging.getLogger(__name__)
+    
+    # Production-grade console output with structured logging
+    def console_info(message, module=None):
+        """Production console info with structured output."""
+        timestamp = datetime.now().isoformat()
+        prefix = f"[{module}]" if module else "[GraphOps]"
+        print(f"{timestamp} INFO {prefix} {message}")
+    
+    def console_debug(message, module=None):
+        """Production console debug (only in debug mode)."""
+        if os.environ.get('DEBUG_GRAPH_OPERATIONS', '').lower() in ('true', '1'):
+            timestamp = datetime.now().isoformat()
+            prefix = f"[{module}]" if module else "[GraphOps]"
+            print(f"{timestamp} DEBUG {prefix} {message}")
+    
+    def console_warning(message, module=None):
+        """Production console warning."""
+        timestamp = datetime.now().isoformat()
+        prefix = f"[{module}]" if module else "[GraphOps]"
+        print(f"{timestamp} WARNING {prefix} {message}")
+    
+    def console_error(message, module=None):
+        """Production console error."""
+        timestamp = datetime.now().isoformat()
+        prefix = f"[{module}]" if module else "[GraphOps]"
+        print(f"{timestamp} ERROR {prefix} {message}")
+    
+    def console_telemetry_event(event_name, properties=None, module=None):
+        """Production telemetry event with structured logging."""
+        timestamp = datetime.now().isoformat()
+        prefix = f"[{module}]" if module else "[GraphOps]"
+        props_str = f" | {properties}" if properties else ""
+        print(f"{timestamp} TELEMETRY {prefix} {event_name}{props_str}")
 
 class GraphOperations:
     def __init__(self, user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"], calendar_response_fields=["subject", "start", "end", "location", "attendees"]):
@@ -49,6 +241,8 @@ class GraphOperations:
         #     raise ValueError("Please set the environment variable 'ENTRA_GRAPH_APPLICATION_CLIENT_SECRET' to your Azure application client secret.")
 
         self.graph_client = None  # Lazy initialization
+        
+        console_info(f"Graph Operations initialized (telemetry: {'enabled' if TELEMETRY_AVAILABLE else 'disabled'})", "GraphOps")
 
     def _get_client(self) -> GraphServiceClient:
         """Get or create the Graph client with lazy initialization."""
@@ -80,6 +274,16 @@ class GraphOperations:
     def get_current_datetime(self) -> str:
         return datetime.now().isoformat()
     
+    def get_telemetry_status(self) -> Dict[str, Any]:
+        """Get comprehensive telemetry status."""
+        return {
+            "telemetry_available": TELEMETRY_AVAILABLE,
+            "telemetry_disabled": TELEMETRY_EXPLICITLY_DISABLED,
+            "mode": "production_fast_load",
+            "startup_time": "optimized",
+            "hanging_prevention": "enabled"
+        }
+    
     def _has_valid_mailbox_properties(self, user: User) -> bool:
         """
         Quick client-side check for mailbox indicators.
@@ -98,6 +302,7 @@ class GraphOperations:
         return True
 
     # Helper method to validate if a user has a valid mailbox for calendar operations
+    @trace_async_method("validate_user_mailbox")
     async def validate_user_mailbox(self, user_id: str) -> dict:
         """
         Validate if a user has a valid mailbox for calendar operations.
@@ -203,6 +408,7 @@ class GraphOperations:
             }
 
     # Get a user by user ID
+    @trace_async_method("get_user_by_user_id")
     async def get_user_by_user_id(self, user_id: str) -> User | None:
         try:
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -231,6 +437,7 @@ class GraphOperations:
             return []
             
     # Get a users manager by user ID
+    @trace_async_method("get_users_manager_by_user_id")
     async def get_users_manager_by_user_id(self, user_id: str) -> DirectoryObject  | None:
         try:
             # Configure the request with proper query parameters
@@ -269,6 +476,7 @@ class GraphOperations:
             return []
     
     # Get direct reports for a user by user ID
+    @trace_async_method("get_direct_reports_by_user_id")
     async def get_direct_reports_by_user_id(self, user_id: str) -> List[User]:
         """
         Get direct reports for a specific user.
@@ -301,6 +509,7 @@ class GraphOperations:
             return []
                 
     # Get all users in the Microsoft 365 Tenant Entra Directory
+    @trace_async_method("get_all_users")
     async def get_all_users(self, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
         """
         Get all users from the Microsoft 365 tenant directory.
@@ -626,7 +835,47 @@ class GraphOperations:
             traceback.print_exc()
             return None
 
+    async def get_users_city_state_zipcode_by_user_id(self, user_id: str) -> dict:
+        """
+        Get city, state, and zipcode for a user by user ID.
+        
+        Args:
+            user_id (str): The ID of the user to retrieve location details for
 
+        Returns:
+            dict: Dictionary with city, state, and zipcode, or None if not found
+        """
+        try:
+            from msgraph.generated.users.item.user_item_request_builder import UserItemRequestBuilder
+            
+            # Configure the request with proper query parameters
+            query_params = UserItemRequestBuilder.UserItemRequestBuilderGetQueryParameters()
+            query_params.select = ["city", "state", "postalCode", "countryOrRegion"]
+            
+            request_configuration = UserItemRequestBuilder.UserItemRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params
+            )
+            
+            user = await self._get_client().users.by_user_id(user_id).get(request_configuration=request_configuration)
+            if not user:
+                return None
+
+            # Extract location details from the user object
+            location = {
+                'city': getattr(user, 'city', None),
+                'state': getattr(user, 'state', None),
+                'zipcode': getattr(user, 'postal_code', None)
+            }
+
+            return location
+
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_users_city_state_zipcode_by_user_id: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return None
+            return None
+        
     # Get user preferences by user ID
     async def get_user_preferences_by_user_id(self, user_id: str) -> User | None:
         """

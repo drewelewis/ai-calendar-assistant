@@ -1,0 +1,19 @@
+Starting simple import test...
+Project root: c:\gitrepos\ai-calendar-assistant
+Operations path exists: True
+Attempting import...
+C:\gitrepos\ai-calendar-assistant\.venv\Lib\site-packages\azure\monitor\opentelemetry\_configure.py:26: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import iter_entry_points  # type: ignore
+✅ Telemetry components loaded successfully
+✅ SUCCESS: Import completed
+Creating instance...
+[90m[14:02:54.524][0m [92mINFO [0m [90m[AzureMapsOperations][0m 📡 AZURE_MAPS_INITIALIZATION: base_url=https://atlas.microsoft.com api_version=1.0 has_client_id=True has_subscription_key=True client_id_source=environment subscription_key_source=environment
+[90m[14:02:54.524][0m [92mINFO [0m [90m[AzureMapsOperations][0m 🔑 Both Managed Identity and Subscription Key available - will prefer Managed Identity
+[90m[14:02:54.524][0m [94mDEBUG[0m [90m[AzureMapsOperations][0m Environment variables: {'AZURE_MAPS_CLIENT_ID': 'set', 'AZURE_MAPS_SUBSCRIPTION_KEY': 'set', 'AZURE_CLIENT_ID': 'not_set', 'AZURE_TENANT_ID': 'not_set'}
+[90m[14:02:54.525][0m [92mINFO [0m [90m[AzureMapsOperations][0m 🗺️  Azure Maps Search Operations initialized - telemetry enabled
+✅ SUCCESS: Instance created
+Checking methods...
+✅ SUCCESS: test_connection method exists
+✅ SUCCESS: get_telemetry_status method exists
+
+🎉 All import tests passed!
