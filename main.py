@@ -31,6 +31,7 @@ if __name__ == "__main__":
     
     try:
         import uvicorn
+        console_info("Starting uvicorn server...", "MAIN")
         uvicorn.run(
             "api.main:app",
             host="0.0.0.0",
@@ -38,7 +39,7 @@ if __name__ == "__main__":
             log_level="debug",
             reload=False,)
     except Exception as e:
-        console_error(f"Unable to start the uvicorn server: {e}")
+        console_error(f"Unable to start the uvicorn server: {e}", "MAIN")
         if telemetry_success:
             logger = get_logger()
             logger.error(f"Failed to start uvicorn server: {e}")

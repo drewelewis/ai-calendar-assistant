@@ -19,14 +19,17 @@ except ImportError:
 from telemetry import (
     trace_async_method,
     measure_performance,
+    get_tracer,
+    get_meter,
+    get_logger
+)
+
+from telemetry.console_output import (
     console_info,
     console_debug,
     console_warning,
     console_error,
-    console_telemetry_event,
-    get_tracer,
-    get_meter,
-    get_logger
+    console_telemetry_event
 )
 
 class AzureMapsOperations:

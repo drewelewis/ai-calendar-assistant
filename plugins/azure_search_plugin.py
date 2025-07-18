@@ -7,20 +7,15 @@ from semantic_kernel.functions import kernel_function
 from telemetry.decorators import TelemetryContext
 from telemetry.console_output import console_info, console_debug, console_telemetry_event, console_error, console_warning
 
-# Import the Azure Maps Operations
+# Import the Azure Search Operations
 try:
-    from operations.azure_maps_operations import AzureMapsOperations
-    console_info("✓ Using Azure Maps Search Operations", module="AzureMapsPlugin")
+    from operations.azure_search_operations import AzureSearchOperations
+    console_info("✓ Using Azure Maps Search Operations", module="AzureSearchPlugin")
 except Exception as e:
-    console_error(f"⚠ Could not import AzureMapsOperations: {e}", module="AzureMapsPlugin")
+    console_error(f"⚠ Could not import AzureSearchOperations: {e}", module="AzureSearchPlugin")
     raise
 
-from utils.teams_utilities import TeamsUtilities
-
-# Initialize TeamsUtilities for sending messages
-teams_utils = TeamsUtilities()
-
-class AzureMapsPlugin:
+class AzureSearchPlugin:
     """
     Azure Maps Search Plugin for Semantic Kernel
     
@@ -51,34 +46,30 @@ class AzureMapsPlugin:
         self.search_ops = None
         
         console_info(f"🗺️ Azure Search Plugin initialized (session: {self.session_id})", 
-                    module="AzureMapsPlugin")
+                    module="AzureSearchPlugin")
         
         if self.debug:
-            console_debug("Debug mode enabled for Azure Search Plugin", module="AzureMapsPlugin")
+            console_debug("Debug mode enabled for Azure Search Plugin", module="AzureSearchPlugin")
     
-    async def _get_search_client(self) -> AzureMapsOperations:
+    async def _get_search_client(self) -> AzureSearchOperations:
         """Get or create the Azure Search Operations client."""
         if self.search_ops is None:
-            self.search_ops = AzureMapsOperations()
+            self.search_ops = AzureSearchOperations()
         return self.search_ops
     
     def _log_function_call(self, function_name, **kwargs):
         """Log function calls if debug is enabled."""
         if self.debug:
-            console_debug(f"🔍 Function called: {function_name}", module="AzureMapsPlugin")
+            console_debug(f"🔍 Function called: {function_name}", module="AzureSearchPlugin")
             for key, value in kwargs.items():
                 if key not in ['session_id']:  # Don't log sensitive info
-                    console_debug(f"  {key}: {value}", module="AzureMapsPlugin")
+                    console_debug(f"  {key}: {value}", module="AzureSearchPlugin")
             
             console_telemetry_event("azure_search_function_call", {
                 "function": function_name,
                 "session_id": self.session_id,
                 "args_count": len(kwargs)
-            }, module="AzureMapsPlugin")
-    
-    def _send_friendly_notification(self, message: str):
-        """Send a friendly notification to the user via Teams about what we're working on."""
-        teams_utils.send_friendly_notification(message, self.session_id, self.debug)
+            }, module="AzureSearchPlugin")
     
     async def _cleanup(self):
         """Clean up resources when done."""
@@ -212,7 +203,7 @@ class AzureMapsPlugin:
             
         except Exception as e:
             error_msg = f"Error searching for nearby locations: {str(e)}"
-            console_error(error_msg, module="AzureMapsPlugin")
+            console_error(error_msg, module="AzureSearchPlugin")
             return f"Sorry, I encountered an error while searching for nearby locations: {str(e)}"
     
     @kernel_function(
@@ -310,7 +301,7 @@ class AzureMapsPlugin:
                 return (f"No valid categories specified. Please use one or more of: {available_cats}")
             
             if invalid_categories:
-                console_warning(f"Invalid categories ignored: {invalid_categories}", module="AzureMapsPlugin")
+                console_warning(f"Invalid categories ignored: {invalid_categories}", module="AzureSearchPlugin")
             
             search_client = await self._get_search_client()
             
@@ -375,7 +366,7 @@ class AzureMapsPlugin:
             
         except Exception as e:
             error_msg = f"Error searching by category: {str(e)}"
-            console_error(error_msg, module="AzureMapsPlugin")
+            console_error(error_msg, module="AzureSearchPlugin")
             return f"Sorry, I encountered an error while searching by category: {str(e)}"
     
     @kernel_function(
@@ -498,7 +489,7 @@ class AzureMapsPlugin:
             
         except Exception as e:
             error_msg = f"Error searching by brand: {str(e)}"
-            console_error(error_msg, module="AzureMapsPlugin")
+            console_error(error_msg, module="AzureSearchPlugin")
             return f"Sorry, I encountered an error while searching by brand: {str(e)}"
     
     @kernel_function(
@@ -621,7 +612,7 @@ class AzureMapsPlugin:
             
         except Exception as e:
             error_msg = f"Error getting available categories: {str(e)}"
-            console_error(error_msg, module="AzureMapsPlugin")
+            console_error(error_msg, module="AzureSearchPlugin")
             return f"Sorry, I encountered an error while getting available categories: {str(e)}"
     
     @kernel_function(
@@ -766,7 +757,7 @@ class AzureMapsPlugin:
             
         except Exception as e:
             error_msg = f"Error searching by region: {str(e)}"
-            console_error(error_msg, module="AzureMapsPlugin")
+            console_error(error_msg, module="AzureSearchPlugin")
             return f"Sorry, I encountered an error while searching by region: {str(e)}"
     
     async def __aenter__(self):

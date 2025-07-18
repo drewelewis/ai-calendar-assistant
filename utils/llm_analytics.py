@@ -109,7 +109,7 @@ class LLMAnalytics:
                 "prompt_tokens": token_usage.prompt_tokens,
                 "completion_tokens": token_usage.completion_tokens,
                 "total_tokens": token_usage.total_tokens,
-                "token_efficiency": f"{(token_usage.completion_tokens / token_usage.total_tokens * 100):.1f}% output"
+                "token_efficiency": f"{(token_usage.completion_tokens / token_usage.total_tokens * 100):.1f}% output" if token_usage.total_tokens > 0 else "0.0% output"
             },
             "cost_breakdown": {
                 "input_cost": f"${input_cost:.6f}",

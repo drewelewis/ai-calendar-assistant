@@ -9,7 +9,7 @@ import datetime
 from dotenv import load_dotenv
 
 from semantic_kernel import Kernel
-from semantic_kernel.agents import ChatCompletionAgent, AgentGroupChat, AgentChatThread
+from semantic_kernel.agents import ChatCompletionAgent, AgentGroupChat
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
 from semantic_kernel.functions import KernelArguments, kernel_function
 from semantic_kernel.connectors.ai import FunctionChoiceBehavior
@@ -402,20 +402,28 @@ Session ID: {self.session_id}
                 thread = await self.cosmos_manager.create_hydrated_thread(self.kernel, self.session_id)
                 self.logger.debug("Thread hydrated from CosmosDB")
             else:
-                thread = AgentChatThread()
+                # In newer semantic-kernel versions, we'll use AgentGroupChat directly
+                thread = []  # Simple list to store chat history
                 self.logger.debug("Created new empty thread")
         
         # Process with agent group chat
         with TelemetryContext(operation="multi_agent_response", message_length=len(message)):
             try:
-                # Add the user message to the thread
-                await thread.add_chat_message(ChatMessageContent(
+                # Create user message
+                user_message = ChatMessageContent(
                     role=AuthorRole.USER,
                     content=message
-                ))
+                )
                 
-                # Get response from the agent group
-                response = await self.group_chat.invoke(thread)
+                # Add to thread if it's a list
+                if isinstance(thread, list):
+                    thread.append(user_message)
+                    # Get response from the agent group using the messages
+                    response = await self.group_chat.invoke([user_message])
+                else:
+                    # For CosmosDB hydrated threads, use the existing method
+                    await thread.add_chat_message(user_message)
+                    response = await self.group_chat.invoke(thread)
                 
                 # Extract the response content
                 response_content = response.content if hasattr(response, 'content') else str(response)

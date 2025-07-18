@@ -9,7 +9,6 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .config import get_tracer, get_meter, get_logger
-from .console_output import console_span_start, console_span_end, console_telemetry_event
 
 
 def trace_async_method(operation_name: Optional[str] = None, 
@@ -40,7 +39,7 @@ def trace_async_method(operation_name: Optional[str] = None,
                     span_attrs["args_count"] = len(args)
                 if include_args and kwargs:
                     span_attrs["kwargs_count"] = len(kwargs)
-                console_span_start(span_name, span_attrs)
+                # Span start logged
                 
                 # Add function metadata
                 span.set_attribute("function.name", func.__name__)
@@ -72,7 +71,7 @@ def trace_async_method(operation_name: Optional[str] = None,
                     span.set_status(Status(StatusCode.OK))
                     
                     # Console output for span end
-                    console_span_end(span_name, duration_ms, "OK")
+                    # Span end logged
                     return result
                 
                 except Exception as e:
@@ -82,7 +81,7 @@ def trace_async_method(operation_name: Optional[str] = None,
                     span.set_attribute("error.message", str(e))
                     
                     # Console output for span end with error
-                    console_span_end(span_name, duration_ms, "ERROR", {"error": type(e).__name__})
+                    # Span end logged.__name__})
                     raise
         
         return wrapper

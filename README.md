@@ -5,87 +5,128 @@
 [![Semantic Kernel](https://img.shields.io/badge/Semantic%20Kernel-512BD4?style=flat&logo=microsoft&logoColor=white)](https://learn.microsoft.com/en-us/semantic-kernel/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Azure Maps](https://img.shields.io/badge/Azure%20Maps-0078D4?style=flat&logo=microsoft&logoColor=white)](https://azure.microsoft.com/en-us/products/azure-maps)
 
-An intelligent calendar assistant powered by Azure OpenAI and Microsoft Graph API that helps users schedule meetings, manage calendar events, and navigate organizational hierarchies through natural language conversations.
+**Version 1.4.0** | An intelligent multi-agent calendar assistant powered by Azure OpenAI and Microsoft Graph API that helps users schedule meetings, manage calendar events, find locations, and navigate organizational hierarchies through natural language conversations.
 
 ## 🎯 Overview
 
-The AI Calendar Assistant combines the power of Azure OpenAI's language models with Microsoft Graph API to create an intelligent agent capable of:
+The AI Calendar Assistant is a sophisticated **multi-agent orchestration system** that combines Azure OpenAI's language models with Microsoft Graph API and Azure Maps to create specialized AI agents capable of:
 
-- **Natural Language Meeting Scheduling**: Schedule meetings using conversational commands
-- **Organizational Intelligence**: Navigate company hierarchies, departments, and team structures
-- **Calendar Management**: View, create, and manage calendar events across Microsoft 365
-- **Intelligent Attendee Discovery**: Find and invite appropriate meeting participants
-- **Availability Checking**: Automatically check attendee availability and suggest alternatives
-- **Conversation Persistence**: Maintain context across sessions with Azure CosmosDB
+- **🤖 Multi-Agent Intelligence**: Specialized agents for calendar, directory, location, and conversation management
+- **📅 Natural Language Meeting Scheduling**: Schedule meetings using conversational commands with intelligent routing
+- **👥 Organizational Intelligence**: Navigate company hierarchies, departments, and team structures
+- **🗺️ Location-Based Services**: Find nearby locations, restaurants, and points of interest using Azure Maps
+- **💰 LLM Cost Analytics**: Real-time token usage tracking and cost analysis with projections
+- **🔄 Automated Version Management**: Seamless CI/CD with automatic version incrementation
+- **📊 Comprehensive Telemetry**: Full observability with Application Insights integration
 
-## 🏗️ Architecture
+## 🏗️ Multi-Agent Architecture
 
 ```mermaid
 graph TB
-    User[👤 User] --> FastAPI[🌐 FastAPI Application]
-    FastAPI --> Agent[🤖 AI Agent]
-    Agent --> SK[🧠 Semantic Kernel]
-    SK --> AzureOpenAI[☁️ Azure OpenAI]
-    Agent --> GraphPlugin[📊 Graph Plugin]
-    GraphPlugin --> MSGraph[📈 Microsoft Graph API]
-    Agent --> CosmosDB[🗄️ Azure CosmosDB]
+    User[👤 User] --> API[🌐 FastAPI API Gateway]
+    API --> Router[🔀 Multi-Agent Router]
     
-    subgraph "Telemetry & Monitoring"
-        Agent --> AppInsights[📊 Application Insights]
-        FastAPI --> AppInsights
-        MSGraph --> AppInsights
+    Router --> ProxyAgent[🤖 Proxy Agent<br/>Main conversation handler]
+    Router --> CalendarAgent[📅 Calendar Agent<br/>Meeting & scheduling]
+    Router --> DirectoryAgent[👥 Directory Agent<br/>User & org searches]
+    Router --> LocationAgent[🗺️ Location Agent<br/>Maps & POI searches]
+    
+    subgraph "AI Foundation"
+        ProxyAgent --> SK[🧠 Semantic Kernel]
+        CalendarAgent --> SK
+        DirectoryAgent --> SK
+        LocationAgent --> SK
+        SK --> AzureOpenAI[☁️ Azure OpenAI<br/>GPT-4o, GPT-4o-mini]
     end
     
     subgraph "Microsoft 365 Integration"
-        MSGraph --> AAD[👥 Azure AD/Entra]
+        CalendarAgent --> GraphPlugin[📊 Graph Plugin]
+        DirectoryAgent --> GraphPlugin
+        GraphPlugin --> MSGraph[📈 Microsoft Graph API]
         MSGraph --> Calendar[📅 Outlook Calendar]
-        MSGraph --> Users[👤 User Profiles]
+        MSGraph --> Users[� User Directory]
+        MSGraph --> Teams[🟢 Microsoft Teams]
+    end
+    
+    subgraph "Location Services"
+        LocationAgent --> MapsPlugin[�️ Azure Maps Plugin]
+        MapsPlugin --> AzureMaps[🌍 Azure Maps API]
+        AzureMaps --> POI[📍 Points of Interest]
+        AzureMaps --> Search[🔍 Location Search]
+    end
+    
+    subgraph "Data & Persistence"
+        Router --> CosmosDB[🗄️ Azure CosmosDB<br/>Chat history]
+        API --> Analytics[📊 LLM Analytics<br/>Cost tracking]
+    end
+    
+    subgraph "Monitoring & Observability"
+        API --> AppInsights[� Application Insights]
+        SK --> Telemetry[� OpenTelemetry]
+        Analytics --> CostMetrics[� Cost Metrics]
     end
 ```
 
-### Core Components
+### 🤖 Specialized Agents
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **AI Agent** | Semantic Kernel + Azure OpenAI | Natural language processing and conversation management |
-| **Graph Integration** | Microsoft Graph SDK | Access to Microsoft 365 data and calendar operations |
-| **API Layer** | FastAPI | RESTful API for web and application integration |
-| **Chat Persistence** | Azure CosmosDB | Conversation history and session management |
-| **Observability** | Azure Application Insights + OpenTelemetry | Comprehensive monitoring and token tracking |
-| **Authentication** | Azure AD/Entra | Secure access to organizational resources |
+| Agent | Role | Capabilities | Plugins |
+|-------|------|-------------|---------|
+| **Proxy Agent** | Main conversation handler & task router | Welcome users, route requests, synthesize responses | Core conversation |
+| **Calendar Agent** | Meeting & scheduling specialist | Create events, check availability, book rooms, manage attendees | Microsoft Graph |
+| **Directory Agent** | Organizational intelligence | Find users, departments, managers, team structures | Microsoft Graph |
+| **Location Agent** | Location-based services | Find nearby POI, restaurants, coffee shops, directions | Azure Maps |
 
 ## ✨ Key Features
 
-### 🗣️ Natural Language Interface
-- Conversational meeting scheduling with context awareness
-- Multi-turn conversations with persistent memory
-- Intelligent parsing of dates, times, and attendee requirements
+### 🗣️ Intelligent Multi-Agent Conversations
+- **Smart Routing**: Automatically routes requests to appropriate specialized agents
+- **Context Preservation**: Maintains conversation context across agent handoffs
+- **Session Management**: Required session ID validation for secure operations
+- **Natural Language**: Conversational interface with context awareness
 
 ### 📅 Advanced Calendar Operations
-- **Meeting Creation**: Schedule meetings with multiple attendees
-- **Availability Checking**: Automatic conflict detection and resolution
-- **Time Zone Handling**: Intelligent time zone conversion and scheduling
-- **Location Management**: Physical and virtual meeting location support
+- **Meeting Creation**: Schedule meetings with multiple attendees and automatic conflict detection
+- **Conference Room Booking**: Find and reserve available meeting rooms
+- **Availability Checking**: Real-time availability analysis with alternative suggestions
+- **Time Zone Intelligence**: Automatic time zone handling and conversion
+- **Teams Integration**: Seamless Microsoft Teams meeting creation
 
 ### 👥 Organizational Intelligence
-- **User Discovery**: Find colleagues by name, department, or role
-- **Team Navigation**: Understand reporting structures and team hierarchies
-- **Department Insights**: Browse organizational departments and members
-- **Manager Relationships**: Identify managers and direct reports
+- **User Discovery**: Find colleagues by name, department, role, or reporting structure
+- **Department Navigation**: Browse organizational departments and team hierarchies
+- **Manager Relationships**: Identify managers, direct reports, and organizational charts
+- **Contact Information**: Retrieve user profiles, preferences, and contact details
+
+### 🗺️ Location-Based Services
+- **Nearby Search**: Find restaurants, coffee shops, gas stations near any location
+- **Category Search**: Search by business categories (dining, shopping, entertainment)
+- **Brand Search**: Find specific brands (Starbucks, McDonald's, etc.)
+- **Regional Search**: Large area geographic searches and mapping
+- **Graceful Failure**: Comprehensive error handling for Maps service unavailability
+
+### 💰 LLM Analytics & Cost Management
+- **Real-Time Cost Tracking**: Live token usage and cost calculation
+- **Model Comparison**: Side-by-side analysis of GPT-4o, GPT-4o-mini, GPT-4-turbo
+- **Usage Projections**: Daily/monthly cost estimates based on current usage
+- **Efficiency Metrics**: Cost per token analysis and optimization recommendations
+- **Detailed Breakdowns**: Input/output token costs with transparency
 
 ### 🔧 Enterprise-Ready Features
 - **Security**: Azure AD authentication with managed identity support
-- **Scalability**: Containerized deployment with Docker support
-- **Monitoring**: Comprehensive telemetry with token usage tracking
-- **Compliance**: Audit trails and security logging
+- **Scalability**: Multi-agent architecture with containerized deployment
+- **Monitoring**: Comprehensive telemetry with token usage and cost tracking
+- **Compliance**: Audit trails, security logging, and data governance
+- **Version Management**: Automated semantic versioning with Docker integration
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Azure OpenAI Service** with deployed model (GPT-4o recommended)
-- **Microsoft Graph API** access with appropriate permissions
+- **Azure OpenAI Service** with deployed models (GPT-4o, GPT-4o-mini recommended)
+- **Microsoft Graph API** access with calendar and directory permissions
+- **Azure Maps** subscription (for location services)
 - **Azure CosmosDB** instance (optional, for chat persistence)
 - **Azure Application Insights** (optional, for telemetry)
 - **Python 3.8+** and **Docker** (for containerized deployment)
@@ -106,13 +147,20 @@ graph TB
 
 3. **Install Dependencies**
    ```bash
+   # Using pip
    pip install -r requirements.txt
+   
+   # Or using the modern Python package approach
+   pip install -e .
    ```
 
 4. **Run the Application**
    ```bash
-   # Console Interface
+   # Console Interface (Single Agent)
    python chat.py
+   
+   # Multi-Agent CLI Interface
+   python multi_agent_cli.py
    
    # API Server
    python main.py
@@ -120,15 +168,38 @@ graph TB
    uvicorn api.main:app --host 0.0.0.0 --port 8989
    ```
 
-### Docker Deployment
+### 🐳 Automated Docker Deployment
+
+The project includes automated versioning and Docker build scripts:
 
 ```bash
-# Build and run with Docker Compose
-docker-compose up -d
+# Auto-increment version and build (recommended workflow)
+_container_build.bat    # Increments minor version automatically
 
-# Or build manually
-docker build -t ai-calendar-assistant .
-docker run -p 8989:8989 --env-file .env ai-calendar-assistant
+# Build and push complete pipeline
+_build_and_push.bat     # Version increment + build + push to registry
+
+# Manual push (uses current version)
+_container_push.bat
+```
+
+**Version Management Features:**
+- ✅ **Automatic minor version increment** during build
+- ✅ **Semantic versioning** (major.minor.patch)
+- ✅ **Docker tags** for both `latest` and version-specific
+- ✅ **Release date tracking** in pyproject.toml
+
+### 📦 Package Installation
+
+```bash
+# Development installation
+pip install -e ".[dev]"
+
+# Testing dependencies
+pip install -e ".[test]"
+
+# Production deployment
+pip install -e ".[deployment]"
 ```
 
 ## ⚙️ Configuration
@@ -137,25 +208,45 @@ docker run -p 8989:8989 --env-file .env ai-calendar-assistant
 
 ```bash
 # Azure OpenAI Configuration
-OPENAI_ENDPOINT=https://your-openai-instance.openai.azure.com/
-OPENAI_API_KEY=your-api-key
-OPENAI_API_VERSION=2025-01-01-preview
-OPENAI_MODEL_DEPLOYMENT_NAME=gpt-4o
+AZURE_OPENAI_ENDPOINT=https://your-openai-instance.openai.azure.com/
+AZURE_OPENAI_API_KEY=your-api-key
+AZURE_OPENAI_API_VERSION=2024-10-21
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
 
-# Microsoft Graph API
-ENTRA_GRAPH_APPLICATION_CLIENT_ID=your-client-id
-ENTRA_GRAPH_APPLICATION_CLIENT_SECRET=your-client-secret
-ENTRA_GRAPH_APPLICATION_TENANT_ID=your-tenant-id
+# Microsoft Graph API Authentication
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+AZURE_TENANT_ID=your-tenant-id
 
-# Azure CosmosDB (Optional)
+# Azure Maps (for location services)
+AZURE_MAPS_CLIENT_ID=your-maps-client-id
+AZURE_MAPS_SUBSCRIPTION_KEY=your-maps-key
+
+# Azure CosmosDB (Optional - for chat persistence)
 COSMOS_ENDPOINT=https://your-cosmosdb.documents.azure.com:443/
-COSMOS_DATABASE=CalendarAssistant
+COSMOS_DATABASE=AIAssistant
 COSMOS_CONTAINER=ChatHistory
 
-# Telemetry (Optional)
+# Telemetry & Monitoring (Optional)
 APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=...
 TELEMETRY_SERVICE_NAME=ai-calendar-assistant
-TELEMETRY_SERVICE_VERSION=1.0.0
+TELEMETRY_SERVICE_VERSION=1.4.0
+```
+
+### Optional Environment Variables
+
+```bash
+# Custom model configurations
+AZURE_OPENAI_MODEL_DEPLOYMENT_NAME=gpt-4o-mini  # Alternative model
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-3-small
+
+# Advanced telemetry
+TELEMETRY_ENABLE_CONSOLE=true
+TELEMETRY_SAMPLE_RATE=1.0
+
+# Development settings
+DEBUG_MODE=true
+LOG_LEVEL=INFO
 ```
 
 ### Azure Services Setup
@@ -218,50 +309,187 @@ az cosmosdb sql container create \
 
 ## 📱 Usage Examples
 
-### Console Interface
+## 🌐 API Endpoints
 
-```python
-# Interactive console chat
-python chat.py
+The AI Calendar Assistant provides comprehensive REST API endpoints for both single-agent and multi-agent interactions:
 
-# Example conversation:
-User: "Schedule a meeting with the engineering team for tomorrow at 2 PM"
-Assistant: "I'll help you schedule that meeting. Let me find the engineering team members..."
+### 📊 System Endpoints
 
-User: "Who is our CEO?"
-Assistant: "Let me look up the organizational structure for you..."
+```http
+GET /health
+# Health check and system status
+
+GET /llm_models  
+# Get available Azure OpenAI models with pricing information
+# Response includes model comparison, costs, and recommendations
+
+POST /calculate_cost
+# Calculate LLM usage costs and projections
+# Body: {"prompt_tokens": 100, "completion_tokens": 50, "model_name": "gpt-4o"}
 ```
 
-### API Interface
+### 🤖 Single Agent Endpoints
 
+```http
+POST /agent_chat
+# Single agent conversation with comprehensive analytics
+# Body: {"session_id": "user-123", "message": "Schedule a meeting"}
+# Response includes LLM analytics, token usage, and cost information
+```
+
+### 🤖🤖 Multi-Agent Endpoints
+
+```http
+POST /multi_agent_chat
+# Multi-agent orchestration with intelligent routing
+# Body: {"session_id": "user-123", "message": "Find nearby restaurants"}
+# Automatically routes to appropriate specialized agent
+
+GET /multi_agent_status
+# Get status of all agents and their capabilities
+# Returns agent health, availability, and configuration
+```
+
+### 📈 Enhanced Response Format
+
+All chat endpoints now include detailed analytics:
+
+```json
+{
+  "response": "I'll help you schedule that meeting...",
+  "📊 llm_analytics": {
+    "🤖 model_details": {
+      "detected_model": "gpt-4o",
+      "deployment_name": "gpt-4o-deployment"
+    },
+    "🔢 token_usage": {
+      "input_tokens": 150,
+      "output_tokens": 75,
+      "total_tokens": 225
+    },
+    "💰 cost_analysis": {
+      "input_cost": "$0.00075",
+      "output_cost": "$0.001125", 
+      "total_cost": "$0.001875"
+    },
+    "📈 cost_projections": {
+      "daily_100_calls": "$0.19/day",
+      "monthly_1k_calls": "$1.88/month"
+    },
+    "⚡ efficiency": "Cost-effective choice for complex reasoning"
+  }
+}
+```
+
+### 🔧 Usage Examples
+
+**Multi-Agent Chat with Cost Tracking:**
 ```bash
-# Health check
-curl http://localhost:8989/health
-
-# Agent chat
-curl -X POST http://localhost:8989/agent_chat \
+curl -X POST http://localhost:8989/multi_agent_chat \
   -H "Content-Type: application/json" \
   -d '{
-    "session_id": "user-123",
-    "message": "Schedule a team meeting for next Tuesday"
+    "session_id": "demo-session-123",
+    "message": "Find coffee shops near Microsoft campus in Redmond"
   }'
 ```
 
-### Programmatic Usage
+**LLM Model Comparison:**
+```bash
+curl http://localhost:8989/llm_models
+# Returns detailed comparison of GPT-4o, GPT-4o-mini, GPT-4-turbo
+```
 
+**Cost Calculation:**
+```bash
+curl -X POST http://localhost:8989/calculate_cost \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_tokens": 1000,
+    "completion_tokens": 500,
+    "model_name": "gpt-4o"
+  }'
+```
+
+## 📱 Usage Examples
+
+### 🖥️ Console Interfaces
+
+**Single Agent Chat:**
+```bash
+python chat.py
+# Traditional single-agent conversation
+
+# Example:
+User: "Schedule a meeting with the engineering team for tomorrow at 2 PM"
+Assistant: "I'll help you schedule that meeting. Let me find the engineering team members..."
+```
+
+**Multi-Agent CLI:**
+```bash
+python multi_agent_cli.py
+# Advanced multi-agent interface with intelligent routing
+
+# Example:
+User: "Find nearby restaurants and schedule lunch with my manager"
+System: Routing to LocationAgent for restaurant search...
+System: Routing to DirectoryAgent to find your manager...
+System: Routing to CalendarAgent to schedule the meeting...
+Assistant: "Found 5 restaurants within 2 miles. Your manager is Jane Smith. I've scheduled lunch..."
+```
+
+### 🌐 Programmatic Usage
+
+**Single Agent:**
 ```python
 from ai.agent import Agent
 
 # Create agent instance
 agent = Agent(session_id="user-session-123")
 
-# Process user input
+# Process user input with cost tracking
 response = await agent.invoke("Who are my direct reports?")
 print(response)
 
-# The agent maintains conversation context automatically
+# Follow-up maintains context
 follow_up = await agent.invoke("Schedule a meeting with them tomorrow")
 print(follow_up)
+```
+
+**Multi-Agent Orchestrator:**
+```python
+from ai.multi_agent import MultiAgentOrchestrator
+
+# Create multi-agent orchestrator (session_id required)
+orchestrator = MultiAgentOrchestrator(session_id="multi-agent-session-456")
+
+# Intelligent routing to specialized agents
+response = await orchestrator.process_message(
+    "Find coffee shops near our office and book a conference room for 3 PM"
+)
+
+# Get agent status
+status = await orchestrator.get_agent_status()
+print(f"Active agents: {status['total_agents']}")
+```
+
+### 🧪 Testing Tools
+
+**Enhanced API Testing:**
+```bash
+# Run comprehensive API tests with analytics
+python test_enhanced_api.py
+
+# Test specific endpoints
+curl http://localhost:8989/llm_models | jq '.'
+```
+
+**Multi-Agent Testing:**
+```bash
+# Test multi-agent functionality
+python test_multi_agent.py
+
+# CLI testing interface
+python multi_agent_cli.py --test-mode
 ```
 
 ## 📊 Advanced Features
@@ -319,107 +547,369 @@ response = await agent.get_response(messages=message, thread=thread)
 3. **`telemetry/config.py`** - Enhanced telemetry configuration
 4. **`telemetry/decorators.py`** - Existing telemetry decorators
 
-#### Token Pricing Models
+## 🚀 Deployment & CI/CD
 
-The system includes current pricing for common Azure OpenAI models:
+### 🔄 Automated Version Management
 
+The project includes sophisticated automated versioning integrated with Docker workflows:
+
+#### Version Management Scripts
+
+```bash
+# Auto-increment minor version and build
+_container_build.bat
+# 1.3.0 → 1.4.0 (auto-increments minor, resets patch)
+# Builds: ai-calendar-assistant:latest and ai-calendar-assistant:1.4.0
+
+# Complete build and push pipeline  
+_build_and_push.bat
+# Increment → Build → Tag → Push (all automated)
+
+# Push existing version to registry
+_container_push.bat
+# Pushes both latest and version-specific tags
+```
+
+#### Version Utilities
+
+```bash
+# Get current version from pyproject.toml
+python version_manager.py get
+# Output: 1.4.0
+
+# Increment minor version programmatically
+python version_manager.py increment  
+# Updates pyproject.toml: 1.4.0 → 1.5.0
+# Updates release date automatically
+```
+
+#### Benefits
+
+- ✅ **Semantic Versioning**: Follows semver (major.minor.patch)
+- ✅ **Consistent Tagging**: Python package and Docker versions stay in sync
+- ✅ **Automated Release Notes**: Updates release date in pyproject.toml
+- ✅ **Dual Tags**: Builds both `latest` and version-specific tags
+- ✅ **Error Handling**: Validates version extraction and build success
+
+### 🐳 Docker Deployment Options
+
+#### Option 1: Quick Start with Docker Compose
+```bash
+# Clone and run immediately
+git clone https://github.com/drewelewis/ai-calendar-assistant.git
+cd ai-calendar-assistant
+cp .env.example .env  # Configure your Azure services
+docker-compose up -d
+```
+
+#### Option 2: Manual Docker Build
+```bash
+# Build with current version
+docker build -t ai-calendar-assistant .
+
+# Run with environment file
+docker run -p 8989:8989 --env-file .env ai-calendar-assistant
+
+# Or with inline environment variables
+docker run -p 8989:8989 \
+  -e AZURE_OPENAI_ENDPOINT=your-endpoint \
+  -e AZURE_OPENAI_API_KEY=your-key \
+  ai-calendar-assistant
+```
+
+#### Option 3: Production Deployment
+```bash
+# Use automated build pipeline
+_build_and_push.bat
+
+# Deploy specific version
+docker pull drewl/ai-calendar-assistant:1.4.0
+docker run -d --name calendar-assistant \
+  --env-file production.env \
+  -p 8989:8989 \
+  drewl/ai-calendar-assistant:1.4.0
+```
+
+### ☁️ Azure Container Apps Deployment
+
+```bash
+# Using Azure CLI
+az containerapp create \
+  --name ai-calendar-assistant \
+  --resource-group your-rg \
+  --environment your-env \
+  --image drewl/ai-calendar-assistant:1.4.0 \
+  --target-port 8989 \
+  --ingress external \
+  --env-vars \
+    AZURE_OPENAI_ENDPOINT="your-endpoint" \
+    AZURE_OPENAI_API_KEY="your-key"
+```
+
+### 🏗️ Infrastructure as Code
+
+The project includes Bicep templates for complete Azure infrastructure:
+
+```bash
+# Deploy all Azure resources
+deploy-infrastructure.bat
+
+# Manual deployment
+az deployment group create \
+  --resource-group your-rg \
+  --template-file infra/main.bicep \
+  --parameters @infra/main.parameters.json
+```
+
+## 📊 Advanced Features Deep Dive
+
+### 🎯 LLM Analytics & Cost Management
+
+**Real-Time Cost Tracking:**
 ```python
-TOKEN_PRICING = {
-    "gpt-4o": {
-        "input": 0.005,   # $0.005 per 1K input tokens
-        "output": 0.015,  # $0.015 per 1K output tokens
+# Automatic cost calculation in API responses
+response = {
+    "💰 cost_analysis": {
+        "input_cost": "$0.00075",
+        "output_cost": "$0.001125",
+        "total_cost": "$0.001875"
     },
-    "gpt-4o-mini": {
-        "input": 0.00015,
-        "output": 0.0006,
-    },
-    # ... more models
+    "📈 cost_projections": {
+        "daily_100_calls": "$0.19/day",
+        "monthly_1k_calls": "$1.88/month",
+        "annual_10k_calls": "$22.56/year"
+    }
 }
 ```
 
-#### Cost Calculation
-
-Costs are calculated using the formula:
+**Model Comparison Tool:**
+```bash
+curl http://localhost:8989/llm_models
+# Returns comprehensive comparison:
+# - GPT-4o: Premium reasoning, $0.005/$0.015 per 1K tokens
+# - GPT-4o-mini: Cost-effective, $0.00015/$0.0006 per 1K tokens  
+# - GPT-4-turbo: Balanced performance, $0.01/$0.03 per 1K tokens
 ```
-Total Cost = (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
-```
 
-#### Usage Examples
+### 🗺️ Location Intelligence with Azure Maps
 
-**Automatic Tracking (Recommended)**
-
-The simplest approach - just initialize telemetry and use your existing code:
-
+**Comprehensive Location Services:**
 ```python
-from telemetry import initialize_telemetry
-from ai.agent import Agent
-
-# Initialize telemetry (enables automatic tracking)
-initialize_telemetry()
-
-# All OpenAI calls are now automatically tracked
-agent = Agent("session-123")
-response = await agent.invoke("Hello!")  # Automatically tracked
-```
-
-**Manual Tracking with Decorator**
-
-For direct OpenAI API calls, use the tracking decorator:
-
-```python
-from telemetry import track_openai_tokens
-
-@track_openai_tokens(model_name="gpt-4o", operation_name="custom_chat")
-async def my_openai_call():
-    response = await client.chat.completions.create(...)
-    return response
-```
-
-**Manual Span Attributes**
-
-Add token information to existing spans:
-
-```python
-from telemetry import add_token_span_attributes, record_token_metrics
-
-# Add to current span
-add_token_span_attributes(openai_response, "gpt-4o")
-
-# Record aggregated metrics
-record_token_metrics(openai_response, "gpt-4o", "chat_completion")
-```
-
-### Microsoft Graph Operations
-
-**User and Organization Management:**
-```python
-# Find users by department
-users = await graph_ops.get_users_by_department("Engineering")
-
-# Get user's manager and direct reports
-manager = await graph_ops.get_users_manager_by_user_id(user_id)
-reports = await graph_ops.get_direct_reports_by_user_id(user_id)
-
-# Search users by various criteria
-results = await graph_ops.search_users("john@company.com")
-```
-
-**Calendar Operations:**
-```python
-# Get user's calendar events
-events = await graph_ops.get_calendar_events_by_user_id(
-    user_id, 
-    start_date="2025-07-01T00:00:00Z",
-    end_date="2025-07-31T23:59:59Z"
+# Find nearby restaurants
+locations = await maps_plugin.search_nearby_locations(
+    latitude=47.6062,
+    longitude=-122.3321,
+    query="restaurants",
+    limit=10
 )
 
-# Create calendar event
-event = await graph_ops.create_calendar_event(
-    user_id="user-guid",
-    subject="Team Meeting",
-    start="2025-07-16T14:00:00Z",
-    end="2025-07-16T15:00:00Z",
-    attendees=["john@company.com", "jane@company.com"]
+# Category-specific searches
+coffee_shops = await maps_plugin.search_by_category(
+    latitude=47.6062, 
+    longitude=-122.3321,
+    category="coffee shop",
+    radius=2000  # 2km radius
+)
+
+# Brand-specific searches  
+starbucks = await maps_plugin.search_by_brand(
+    latitude=47.6062,
+    longitude=-122.3321, 
+    brand="starbucks",
+    limit=5
+)
+```
+
+**Graceful Error Handling:**
+- ✅ Network connectivity issues
+- ✅ API quota exhaustion
+- ✅ Invalid coordinates
+- ✅ Service unavailability
+- ✅ Comprehensive logging and telemetry
+
+### 🔐 Enterprise Security Features
+
+**Authentication Methods:**
+```python
+# Managed Identity (recommended for Azure deployment)
+credential = ManagedIdentityCredential()
+
+# Service Principal (for development)
+credential = ClientSecretCredential(
+    tenant_id=os.getenv("AZURE_TENANT_ID"),
+    client_id=os.getenv("AZURE_CLIENT_ID"), 
+    client_secret=os.getenv("AZURE_CLIENT_SECRET")
+)
+
+# Interactive login (for testing)
+credential = InteractiveBrowserCredential()
+```
+
+**Data Privacy & Compliance:**
+- ✅ **Session Isolation**: Required session IDs prevent data leakage
+## 📁 Project Structure
+
+```
+ai-calendar-assistant/
+├── 📁 ai/                           # Core AI components
+│   ├── agent.py                     # Single-agent implementation
+│   ├── azure_openai_client.py       # Azure OpenAI integration
+│   └── multi_agent.py               # Multi-agent orchestrator ⭐
+├── 📁 api/                          # FastAPI REST API
+│   ├── chat_completion.py           # Single-agent endpoints
+│   └── main.py                      # Enhanced API with multi-agent ⭐
+├── 📁 models/                       # Pydantic data models
+│   ├── chat_models.py               # Chat request/response models
+│   ├── graph_models.py              # Microsoft Graph models
+│   └── openai_models.py             # OpenAI API models
+├── 📁 plugins/                      # Semantic Kernel plugins
+│   ├── graph_plugin.py              # Microsoft Graph integration
+│   └── azure_maps_plugin.py         # Azure Maps integration ⭐
+├── 📁 storage/                      # Data persistence
+│   └── cosmosdb_chat_history_manager.py  # Chat history in CosmosDB
+├── 📁 telemetry/                    # Observability & monitoring
+│   ├── config.py                    # Telemetry configuration
+│   ├── decorators.py                # Performance decorators
+│   ├── token_tracking.py            # Token usage tracking ⭐
+│   └── semantic_kernel_instrumentation.py  # Auto instrumentation ⭐
+├── 📁 utils/                        # Utility modules
+│   ├── teams_utilities.py           # Teams integration helpers
+│   └── llm_analytics.py             # Cost analysis utilities ⭐
+├── 📁 infra/                        # Infrastructure as Code
+│   ├── main.bicep                   # Azure Bicep template
+│   └── main.parameters.json         # Deployment parameters
+├── 📁 scripts/                      # Build & deployment scripts
+│   ├── _container_build.bat         # Auto-versioning Docker build ⭐
+│   ├── _container_push.bat          # Docker registry push ⭐
+│   ├── _build_and_push.bat          # Complete CI/CD pipeline ⭐
+│   └── version_manager.py           # Version management utility ⭐
+├── main.py                          # Single-agent console interface
+├── chat.py                          # Simple chat interface
+├── multi_agent_cli.py               # Multi-agent CLI interface ⭐
+├── test_enhanced_api.py             # API testing with analytics ⭐
+├── test_multi_agent.py              # Multi-agent testing ⭐
+├── pyproject.toml                   # Modern Python packaging ⭐
+├── requirements.txt                 # Python dependencies
+├── dockerfile                       # Container configuration
+├── docker-compose.yaml              # Multi-service deployment
+└── azure.yaml                       # Azure Developer CLI config
+
+⭐ = New in v1.4.0
+```
+
+## 📚 Version History
+
+### 🚀 v1.4.0 (2025-07-18) - Multi-Agent Intelligence
+
+**🎯 Major Features:**
+- ✅ **Multi-Agent Orchestration**: 4 specialized agents (Proxy, Calendar, Directory, Location)
+- ✅ **Azure Maps Integration**: Location-based services with comprehensive POI search
+- ✅ **LLM Cost Analytics**: Real-time token tracking and cost projections
+- ✅ **Automated Version Management**: Semantic versioning with Docker integration
+- ✅ **Enhanced API Endpoints**: `/multi_agent_chat`, `/llm_models`, `/calculate_cost`
+- ✅ **Session Validation**: Required session ID for secure multi-agent operations
+
+**🔧 Technical Improvements:**
+- ✅ **Modern Python Packaging**: Migrated to `pyproject.toml` standard
+- ✅ **Intelligent Agent Routing**: Context-aware agent selection strategy
+- ✅ **Graceful Error Handling**: Comprehensive failure management across all services
+- ✅ **Enhanced Telemetry**: OpenTelemetry integration with token usage metrics
+- ✅ **Cost Transparency**: Detailed breakdown of LLM usage costs and projections
+
+**📊 Analytics & Observability:**
+- ✅ **Token Usage Tracking**: Real-time monitoring of input/output tokens
+- ✅ **Cost Calculations**: Live cost analysis with daily/monthly projections
+- ✅ **Model Comparison**: Side-by-side analysis of GPT-4o variants
+- ✅ **Performance Metrics**: Request latency and efficiency measurements
+
+### 🔄 v1.3.0 (2025-07-15) - Enhanced Foundation
+
+- ✅ Enhanced chat history persistence with CosmosDB
+- ✅ Improved error handling and logging
+- ✅ Advanced telemetry with Application Insights
+- ✅ Performance optimizations for Microsoft Graph operations
+- ✅ Docker containerization improvements
+
+### 📅 v1.2.0 (2025-07-10) - Calendar Intelligence  
+
+- ✅ Advanced meeting scheduling with conflict detection
+- ✅ Conference room booking and management
+- ✅ Attendee discovery and validation
+- ✅ Time zone intelligence and conversion
+- ✅ Microsoft Teams integration
+
+### 👥 v1.1.0 (2025-07-05) - Organizational Intelligence
+
+- ✅ User directory search and discovery
+- ✅ Department and team hierarchy navigation
+- ✅ Manager and direct reports identification
+- ✅ Organizational chart traversal
+- ✅ Contact information retrieval
+
+### 🎯 v1.0.0 (2025-07-01) - Foundation Release
+
+- ✅ Core AI agent with Semantic Kernel
+- ✅ Azure OpenAI integration (GPT-4o)
+- ✅ Microsoft Graph API connectivity
+- ✅ Basic calendar operations
+- ✅ FastAPI REST interface
+- ✅ Docker deployment support
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/drewelewis/ai-calendar-assistant.git
+cd ai-calendar-assistant
+
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Format code
+black .
+flake8 .
+
+# Test multi-agent functionality
+python test_multi_agent.py
+```
+
+### Creating Features
+
+1. **Add new agent capabilities** in `ai/multi_agent.py`
+2. **Create new plugins** in `plugins/` directory
+3. **Add API endpoints** in `api/main.py`
+4. **Include comprehensive tests** in test files
+5. **Update documentation** in README.md
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Microsoft Semantic Kernel** team for the excellent AI orchestration framework
+- **Azure OpenAI Service** for powerful language model capabilities  
+- **Microsoft Graph** for comprehensive Microsoft 365 integration
+- **Azure Maps** for location intelligence services
+- **FastAPI** community for the modern Python web framework
+
+## 📞 Support
+
+- 📖 **Documentation**: This README and inline code documentation
+- 🐛 **Issues**: [GitHub Issues](https://github.com/drewelewis/ai-calendar-assistant/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/drewelewis/ai-calendar-assistant/discussions)
+- 📧 **Contact**: drewelewis@outlook.com
+
+---
+
+**AI Calendar Assistant v1.4.0** - Intelligent multi-agent calendar management powered by Azure AI 🚀
 )
 ```
 

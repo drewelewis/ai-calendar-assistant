@@ -227,6 +227,11 @@ def console_info(message: str, module: Optional[str] = None, **kwargs):
     get_telemetry_console().info(message, module, **kwargs)
 
 
+def console_success(message: str, module: Optional[str] = None, **kwargs):
+    """Print success message to console if enabled (uses info level with green color)"""
+    get_telemetry_console().info(message, module, **kwargs)
+
+
 def console_debug(message: str, module: Optional[str] = None, **kwargs):
     """Print debug to console if enabled"""
     get_telemetry_console().debug(message, module, **kwargs)
