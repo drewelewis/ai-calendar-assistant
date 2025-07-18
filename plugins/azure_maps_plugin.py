@@ -152,6 +152,9 @@ class AzureMapsPlugin:
                                radius=radius, limit=limit, language=language)
         
         try:
+            # Notify user we're searching
+            self._send_friendly_notification(f"🔍 Searching for places near coordinates {latitude}, {longitude}...")
+            
             search_client = await self._get_search_client()
             
             # Perform the search
@@ -289,6 +292,9 @@ class AzureMapsPlugin:
                                categories=categories, radius=radius, limit=limit)
         
         try:
+            # Notify user we're searching by category
+            self._send_friendly_notification(f"🏷️ Searching for {categories} near your location...")
+            
             # Map category names to Azure Maps category IDs
             category_mapping = {
                 'restaurant': 7315,
@@ -444,6 +450,9 @@ class AzureMapsPlugin:
                                brands=brands, radius=radius, limit=limit)
         
         try:
+            # Notify user we're searching by brand
+            self._send_friendly_notification(f"🏪 Searching for {brands} locations near you...")
+            
             # Parse brand list
             brand_list = [brand.strip() for brand in brands.split(',') if brand.strip()]
             
@@ -559,6 +568,9 @@ class AzureMapsPlugin:
         self._log_function_call("get_available_categories")
         
         try:
+            # Notify user we're fetching categories
+            self._send_friendly_notification("📋 Getting available search categories for you...")
+            
             search_client = await self._get_search_client()
             categories = await search_client.get_poi_categories()
             
@@ -697,6 +709,9 @@ class AzureMapsPlugin:
                                countries=countries, radius=radius, limit=limit)
         
         try:
+            # Notify user we're searching by region
+            self._send_friendly_notification(f"🌍 Searching for places in {countries} region...")
+            
             # Parse and validate country codes
             country_list = [country.strip().upper() for country in countries.split(',') if country.strip()]
             
@@ -781,6 +796,139 @@ class AzureMapsPlugin:
             error_msg = f"Error searching by region: {str(e)}"
             console_error(error_msg, module="AzureMapsPlugin")
             return f"Sorry, I encountered an error while searching by region: {str(e)}"
+    
+    @kernel_function(
+        description="""
+        Get geographical coordinates (latitude and longitude) for a city and state using Azure Maps geocoding.
+        
+        USE THIS WHEN:
+        - User provides a city and state and needs coordinates
+        - Converting location names to lat/lng for other location services
+        - User asks "where is [city], [state]?" or "what are the coordinates of [city]?"
+        - Need to find the exact location of a place for mapping or distance calculations
+        
+        CAPABILITIES:
+        - Converts city/state combinations to precise coordinates
+        - Returns detailed location information including formatted addresses
+        - Supports US cities and states with high accuracy
+        - Provides additional location metadata when available
+        
+        COMMON USE CASES:
+        - "What are the coordinates of Seattle, WA?"
+        - "Where exactly is Austin, Texas located?"
+        - "Get the lat/lng for Portland, Oregon"
+        - "Find the location of Miami, Florida"
+        
+        EXAMPLES:
+        - Input: city="Seattle", state="WA" → Returns coordinates and location details
+        - Input: city="Austin", state="Texas" → Returns coordinates and location details
+        - Input: city="Portland", state="OR" → Returns coordinates and location details
+        
+        RESPONSE INCLUDES:
+        - Latitude and longitude coordinates
+        - Formatted address
+        - Administrative region details
+        - Bounding box information
+        - Match confidence score
+        """
+    )
+    async def geolocate_city_state(self,
+                                   city: Annotated[str, "City name (e.g., 'Seattle', 'Austin', 'Portland')"],
+                                   state: Annotated[str, "State name or abbreviation (e.g., 'WA', 'Washington', 'TX', 'Texas')"]) -> str:
+        """
+        Get geographical coordinates and location details for a city and state.
+        
+        Returns formatted location information including coordinates and address details.
+        """
+        self._log_function_call("geolocate_city_state", city=city, state=state)
+        
+        try:
+            search_client = await self._get_search_client()
+            
+            # Notify user we're looking up the location
+            self._send_friendly_notification(f"🗺️ Looking up coordinates for {city}, {state}...")
+            
+            # Perform the geocoding search
+            result = await search_client.geolocate_city_state(city, state)
+            
+            if not result or 'features' not in result:
+                return f"Could not find location information for {city}, {state}. Please check the spelling and try again."
+            
+            features = result.get('features', [])
+            if not features:
+                return f"No location found for {city}, {state}. Please verify the city and state names."
+            
+            # Get the best match (first result)
+            best_match = features[0]
+            geometry = best_match.get('geometry', {})
+            properties = best_match.get('properties', {})
+            
+            # Extract coordinates
+            coordinates = geometry.get('coordinates', [])
+            if len(coordinates) >= 2:
+                longitude, latitude = coordinates[0], coordinates[1]  # GeoJSON format: [lng, lat]
+            else:
+                return f"Invalid coordinate data received for {city}, {state}."
+            
+            # Extract location details
+            address = properties.get('address', {})
+            formatted_address = address.get('formattedAddress', f"{city}, {state}")
+            country = address.get('country', 'Unknown')
+            admin_division = address.get('adminDivision', 'Unknown')
+            locality = address.get('locality', city)
+            
+            # Get confidence information
+            confidence = properties.get('confidence', 'Unknown')
+            match_type = properties.get('matchCodes', [])
+            
+            # Build formatted response
+            response_lines = [
+                f"📍 Location found for {city}, {state}:",
+                f"",
+                f"🎯 Coordinates: {latitude:.6f}, {longitude:.6f}",
+                f"📮 Formatted Address: {formatted_address}",
+                f"🌍 Country: {country}",
+                f"🏛️ Administrative Division: {admin_division}",
+                f"🏙️ Locality: {locality}",
+                f"✅ Match Confidence: {confidence}",
+            ]
+            
+            if match_type:
+                response_lines.append(f"🔍 Match Type: {', '.join(match_type)}")
+            
+            response_lines.extend([
+                f"",
+                f"💡 Use these coordinates ({latitude:.6f}, {longitude:.6f}) for:",
+                f"   • Finding nearby places and services",
+                f"   • Distance calculations",
+                f"   • Map integration and directions"
+            ])
+            
+            # Log successful geocoding
+            console_telemetry_event("azure_maps_geocode_success", {
+                "city": city,
+                "state": state,
+                "latitude": latitude,
+                "longitude": longitude,
+                "confidence": confidence,
+                "session_id": self.session_id
+            }, module="AzureMapsPlugin")
+            
+            return "\n".join(response_lines)
+            
+        except Exception as e:
+            error_msg = f"Error geocoding {city}, {state}: {str(e)}"
+            console_error(error_msg, module="AzureMapsPlugin")
+            
+            # Log failed geocoding
+            console_telemetry_event("azure_maps_geocode_error", {
+                "city": city,
+                "state": state,
+                "error": str(e),
+                "session_id": self.session_id
+            }, module="AzureMapsPlugin")
+            
+            return f"Sorry, I encountered an error while looking up coordinates for {city}, {state}: {str(e)}"
     
     async def __aenter__(self):
         """Async context manager entry."""

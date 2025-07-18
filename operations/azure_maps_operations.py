@@ -371,7 +371,7 @@ class AzureMapsOperations:
                 console_error(f"Failed to get POI data: {response.status}", "AzureMaps")
                 raise Exception(f"POI search request failed: {response.status}")
                 
-    async def search_nearby(self, latitude: float, longitude: float, radius: int = 1000, limit: int = 20) -> Dict[str, Any]:
+    async def search_nearby(self, latitude: float, longitude: float, radius: int = 10, limit: int = 20) -> Dict[str, Any]:
         """Search nearby POIs with fast execution."""
         console_info(f"Searching near {latitude}, {longitude} within {radius}m", "AzureMaps")
         
@@ -410,3 +410,50 @@ class AzureMapsOperations:
             else:
                 console_error(f"Nearby search failed: {response.status}", "AzureMaps")
                 raise Exception(f"Nearby search failed: {response.status}")
+            
+    @trace_async_method("geolocate_city_state")
+    async def geolocate_city_state(self, city: str, state: str) -> Optional[Dict[str, Any]]:
+        """
+        Geolocate a city and state to get coordinates and location details.
+        
+        Args:
+            city (str): The city name to geolocate
+            state (str): The state name to geolocate
+            
+        Returns:
+            Optional[Dict[str, Any]]: Geolocation result with coordinates and details, or None if failed
+        """
+        console_info(f"🗺️ Looking up coordinates for {city}, {state}...", "AzureMaps")
+
+        # Setup authentication and parameters
+        params = {
+            "api-version": "1.0",
+            "city": city,
+            "state": state
+        }
+        headers = {}
+
+        if self.subscription_key:
+            # Use subscription key as URL parameter
+            params["subscription-key"] = self.subscription_key
+        else:
+            # Use managed identity with Authorization header
+            credential = DefaultAzureCredential()
+            token = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
+            )
+            headers["Authorization"] = f"Bearer {token.token}"
+
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+        url = f"{self.base_url}/search/geocode/json"
+
+        async with self.session.get(url, headers=headers, params=params) as response:
+            if response.status == 200:
+                result = await response.json()
+                console_info(f"Geolocation result: {result}", "AzureMaps")
+                return result
+            else:
+                console_error(f"Geolocation failed: {response.status}", "AzureMaps")
+                raise Exception(f"Geolocation failed: {response.status}")
