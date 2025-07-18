@@ -1,0 +1,196 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-calendar-assistant"
+version = "1.4.0"
+description = "Azure OpenAI powered calendar assistant with Microsoft Graph integration and multi-agent orchestration"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "drewelewis", email = "drew@example.com"}
+]
+maintainers = [
+    {name = "drewelewis", email = "drew@example.com"}
+]
+keywords = ["azure", "openai", "calendar", "microsoft-graph", "ai-assistant", "multi-agent"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Scheduling",
+    "Topic :: Communications :: Chat",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.24.0",
+    "semantic-kernel>=1.0.0",
+    "azure-identity>=1.15.0",
+    "azure-cosmos>=4.5.0",
+    "aiohttp>=3.9.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-auto-instrumentation>=0.41b0",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "httpx>=0.25.0",
+]
+deployment = [
+    "docker>=6.0.0",
+    "azure-cli>=2.50.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/drewelewis/ai-calendar-assistant"
+Repository = "https://github.com/drewelewis/ai-calendar-assistant.git"
+Documentation = "https://github.com/drewelewis/ai-calendar-assistant/wiki"
+"Bug Tracker" = "https://github.com/drewelewis/ai-calendar-assistant/issues"
+Changelog = "https://github.com/drewelewis/ai-calendar-assistant/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ai-calendar = "main:main"
+ai-calendar-cli = "multi_agent_cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+exclude = ["tests*", "*.tests*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml", "*.json", "*.md", "*.txt"]
+
+# Black configuration
+[tool.black]
+line-length = 120
+target-version = ["py38", "py39", "py310", "py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+# MyPy configuration
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+    "--tb=short",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests", "."]
+python_files = ["test_*.py", "*_test.py"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "test_*.py",
+    "*_test.py",
+    "venv/*",
+    ".venv/*",
+    "build/*",
+    "dist/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+
+# Project-specific metadata (custom section)
+[tool.ai-calendar-assistant]
+version = "1.4.0"
+release_date = "2025-07-18"
+
+[tool.ai-calendar-assistant.features]
+single_agent = true
+multi_agent = true
+azure_maps = true
+cost_analytics = true
+
+[tool.ai-calendar-assistant.agents]
+proxy = "Main conversation handler and task router"
+calendar = "Specialized calendar operations and scheduling" 
+directory = "User searches and organizational data"
+location = "Location-based searches and mapping"
+
+[tool.ai-calendar-assistant.integrations]
+microsoft_graph = {enabled = true, version = "v1.0"}
+azure_openai = {enabled = true, models = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]}
+azure_maps = {enabled = true, services = ["search", "geocoding"]}
+cosmos_db = {enabled = true, purpose = "chat_history"}
+app_insights = {enabled = true, purpose = "telemetry"}
+
+[tool.ai-calendar-assistant.api]
+version = "v1"
+base_url = "/api/v1"
+endpoints = [
+    "GET /health",
+    "POST /agent_chat", 
+    "POST /multi_agent_chat",
+    "GET /multi_agent_status",
+    "GET /llm_models",
+    "POST /calculate_cost"
+]

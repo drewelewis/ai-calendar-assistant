@@ -396,6 +396,68 @@ class GraphOperations:
             print("Full traceback:")
             traceback.print_exc()
             return []
+
+    async def get_conference_room_availability(self, room_id: str, start_time: datetime, end_time: datetime) -> bool:
+        try:
+            # Call the Graph API to get the availability of the conference room
+            response = await self._get_client().users[room_id].calendar.get_schedule(
+                start_time=start_time,
+                end_time=end_time
+            )
+            return response.value
+        except Exception as e:
+            print(f"Error in get_conference_room_availability: {e}")
+            return False
+
+    async def get_conference_room_details_by_id(self, room_id: str) -> dict:
+        """
+        Get detailed information about a specific conference room by its ID.
+        
+        Args:
+            room_id (str): The unique ID of the conference room to retrieve details for
+            
+        Returns:
+            dict: Detailed information about the specified conference room
+        """
+        try:
+            # Fetch the conference room details
+            room = await self._get_client().users.by_user_id(room_id).get()
+            
+            if not room:
+                return {}
+            
+            # Convert to dict for easier handling, checking for attribute existence
+            room_details = {
+                'id': room.id,
+                'displayName': room.display_name,
+                'mail': room.mail,
+                'userPrincipalName': getattr(room, 'user_principal_name', None),
+                'jobTitle': getattr(room, 'job_title', None),
+                'department': getattr(room, 'department', None)
+            }
+            
+            # Check for capacity attribute (might not exist for User objects representing rooms)
+            if hasattr(room, 'capacity'):
+                room_details['capacity'] = room.capacity
+            else:
+                room_details['capacity'] = None
+            
+            # Check for location attribute and handle it safely
+            if hasattr(room, 'location') and room.location:
+                try:
+                    room_details['location'] = room.location.__dict__
+                except:
+                    room_details['location'] = str(room.location) if room.location else None
+            else:
+                room_details['location'] = None
+            
+            return room_details
+            
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_conference_room_details_by_id: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return {}
         
     # Get all departments
     async def get_all_departments(self, max_results) -> List[str]:
@@ -719,6 +781,97 @@ class GraphOperations:
             print("Full traceback:")
             traceback.print_exc()
             return None
+
+    # Get and display conference room events
+    async def get_conference_room_events(self, conference_rooms: List[User]) -> List[dict]:
+        """
+        Get and display calendar events for a list of conference rooms.
+        
+        Args:
+            conference_rooms (List[User]): List of conference room User objects
+            
+        Returns:
+            List[dict]: List of conference room objects with their events
+        """
+        try:
+            conference_rooms_with_events = []
+            
+            for room in conference_rooms:
+                print(60 * "=")
+                print(f"ID: {room.id}")
+                print(f"Display Name: {room.display_name}")
+                print(f"User Principal Name: {room.user_principal_name}")
+                print(f"Mail: {room.mail}")
+                print(f"Job Title: {room.job_title}")
+                print(f"Department: {room.department}")
+                print(f"Manager: {room.manager}")
+
+                # Get calendar events for this room
+                get_calendar_events = await self.get_calendar_events_by_user_id(room.id)
+                
+                # Process events into a structured format
+                events_list = []
+                if get_calendar_events:
+                    print(f"Found {len(get_calendar_events)} calendar events for room {room.display_name}")
+                    for event in get_calendar_events:
+                        # Print event details (keeping original console output)
+                        print(f"Event Subject: {event.subject}")
+                        print(f"Start: {event.start.date_time} {event.start.time_zone}")
+                        print(f"End: {event.end.date_time} {event.end.time_zone}")
+                        print(f"Location: {event.location.display_name if event.location else 'No location'}")
+                        print("Attendees:")
+                        for attendee in event.attendees:
+                            print(f"  - {attendee.email_address.address} ({attendee.type})")
+                        
+                        # Create structured event data
+                        attendees_list = []
+                        if event.attendees:
+                            for attendee in event.attendees:
+                                attendees_list.append({
+                                    "email": attendee.email_address.address,
+                                    "type": attendee.type,
+                                    "name": getattr(attendee.email_address, 'name', '') or attendee.email_address.address
+                                })
+                        
+                        event_data = {
+                            "id": getattr(event, 'id', ''),
+                            "subject": event.subject or '',
+                            "start": {
+                                "date_time": event.start.date_time,
+                                "time_zone": event.start.time_zone
+                            },
+                            "end": {
+                                "date_time": event.end.date_time,
+                                "time_zone": event.end.time_zone
+                            },
+                            "location": event.location.display_name if event.location else 'No location',
+                            "attendees": attendees_list
+                        }
+                        events_list.append(event_data)
+                else:
+                    print(f"No calendar events found for room {room.display_name}")
+                
+                # Create structured room data with events
+                room_data = {
+                    "id": room.id,
+                    "display_name": room.display_name,
+                    "user_principal_name": room.user_principal_name,
+                    "mail": room.mail,
+                    "job_title": room.job_title,
+                    "department": room.department,
+                    "manager": room.manager,
+                    "events": events_list,
+                    "event_count": len(events_list)
+                }
+                conference_rooms_with_events.append(room_data)
+            
+            return conference_rooms_with_events
+                            
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_conference_room_events: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return []
       
 # # Example usage:
 
@@ -733,32 +886,12 @@ async def main():
     print(60 * "=")
     conference_rooms = await ops.get_all_conference_rooms(100)
     if conference_rooms:
-        for room in conference_rooms:
-            print(60 * "=")
-            print(f"ID: {room.id}")
-            print(f"Display Name: {room.display_name}")
-            print(f"User Principal Name: {room.user_principal_name}")
-            print(f"Mail: {room.mail}")
-            print(f"Job Title: {room.job_title}")
-            print(f"Department: {room.department}")
-            print(f"Manager: {room.manager}")
-
-            get_calendar_events = await ops.get_calendar_events_by_user_id(room.id)
-            if get_calendar_events:
-                print(f"Found {len(get_calendar_events)} calendar events for room {room.display_name}")
-                for event in get_calendar_events:
-                    print(f"Event Subject: {event.subject}")
-                    print(f"Start: {event.start.date_time} {event.start.time_zone}")
-                    print(f"End: {event.end.date_time} {event.end.time_zone}")
-                    print(f"Location: {event.location.display_name if event.location else 'No location'}")
-                    print("Attendees:")
-                    for attendee in event.attendees:
-                        print(f"  - {attendee.email_address.address} ({attendee.type})")
-                        
-    else:   
+        await ops.get_conference_room_events(conference_rooms)
+    else:
         print("No conference rooms found.")
 
-            
+
+
 
     # print("Get User Mailbox Settings by User ID")
     # mailbox_settings = await ops.get_user_mailbox_settings_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
@@ -885,6 +1018,5 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
-
 
 

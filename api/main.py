@@ -7,6 +7,8 @@ from api.chat_completion import chat as api_chat
 from models.openai_models import OpenAIModels
 from models.chat_models import ChatModels
 from ai.agent import Agent
+from ai.multi_agent import MultiAgentOrchestrator
+from utils.llm_analytics import llm_analytics, TokenUsage
 
 # Import telemetry components
 from telemetry.config import initialize_telemetry, get_telemetry
@@ -74,4 +76,209 @@ async def agent_chat(message: ChatModels.Message):
     
     agent = Agent(session_id=message.session_id)
     result = await agent.invoke(message.message)
-    return result
+    
+    # Extract token usage for cost analysis
+    token_usage = llm_analytics.extract_token_usage_from_response(result)
+    
+    # Calculate costs and analytics
+    cost_data = llm_analytics.calculate_cost(token_usage)
+    analytics = llm_analytics.format_analytics_display(cost_data, message.session_id, "single_agent")
+    
+    return {
+        "response": result.content if hasattr(result, 'content') else str(result),
+        "session_id": message.session_id,
+        "agent_type": "single_agent",
+        **analytics
+    }
+
+@app.post("/multi_agent_chat")
+@trace_async_method(operation_name="api.multi_agent_chat", include_args=True)
+@measure_performance("api_multi_agent_chat")
+async def multi_agent_chat(message: ChatModels.Message):
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info(f"Multi-agent chat request for session: {message.session_id}")
+    
+    try:
+        # Validate session_id is provided
+        if not message.session_id:
+            logger.error("Session ID is required for multi-agent chat")
+            return {
+                "error": "Session ID is required",
+                "message": "Please provide a valid session_id in your request"
+            }
+        
+        # Create multi-agent orchestrator with required session_id
+        orchestrator = MultiAgentOrchestrator(session_id=message.session_id)
+        
+        # Process message through multi-agent system
+        result = await orchestrator.process_message(message.message)
+        
+        # For multi-agent, we'll estimate token usage based on response length
+        # In a production system, you'd want to modify the orchestrator to return token usage
+        estimated_tokens = TokenUsage(
+            prompt_tokens=len(message.message.split()) * 1.3,  # Rough estimate
+            completion_tokens=len(result.split()) * 1.3,  # Rough estimate
+            total_tokens=(len(message.message.split()) + len(result.split())) * 1.3
+        )
+        
+        # Calculate costs and analytics
+        cost_data = llm_analytics.calculate_cost(estimated_tokens)
+        analytics = llm_analytics.format_analytics_display(cost_data, message.session_id, "multi_agent")
+        
+        return {
+            "response": result,
+            "session_id": message.session_id,
+            "agent_type": "multi_agent",
+            "note": "Token usage estimated for multi-agent system",
+            **analytics
+        }
+        
+    except ValueError as ve:
+        # Handle session_id validation errors
+        logger.error(f"Multi-agent validation error: {ve}")
+        return {
+            "error": "Validation Error", 
+            "message": str(ve)
+        }
+    except Exception as e:
+        # Handle other errors
+        logger.error(f"Multi-agent chat error: {e}")
+        return {
+            "error": "Processing Error",
+            "message": "An error occurred while processing your request. Please try again."
+        }
+
+@app.get("/multi_agent_status")
+@trace_async_method(operation_name="api.multi_agent_status")
+async def multi_agent_status(session_id: str):
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info(f"Multi-agent status request for session: {session_id}")
+    
+    try:
+        # Validate session_id is provided
+        if not session_id:
+            return {
+                "error": "Session ID is required",
+                "message": "Please provide a valid session_id parameter"
+            }
+        
+        # Create multi-agent orchestrator to get status
+        orchestrator = MultiAgentOrchestrator(session_id=session_id)
+        status = await orchestrator.get_agent_status()
+        
+        return {
+            "status": "success",
+            "data": status
+        }
+        
+    except ValueError as ve:
+        # Handle session_id validation errors
+        logger.error(f"Multi-agent status validation error: {ve}")
+        return {
+            "error": "Validation Error", 
+            "message": str(ve)
+        }
+    except Exception as e:
+        # Handle other errors
+        logger.error(f"Multi-agent status error: {e}")
+        return {
+            "error": "Status Error",
+            "message": "An error occurred while retrieving agent status. Please try again."
+        }
+
+@app.get("/llm_models")
+@trace_async_method(operation_name="api.llm_models")
+async def get_llm_models():
+    """Get available Azure OpenAI models and their pricing information."""
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info("LLM models and pricing request")
+    
+    try:
+        model_comparison = llm_analytics.get_model_comparison()
+        
+        return {
+            "status": "success",
+            "data": {
+                "🤖 azure_openai_models": model_comparison["available_models"],
+                "💡 pricing_information": {
+                    "currency": "USD",
+                    "unit": "per 1,000 tokens",
+                    "notes": model_comparison["pricing_notes"],
+                    "current_deployment": os.getenv("OPENAI_MODEL_DEPLOYMENT_NAME", "Not configured"),
+                    "last_updated": "2024-Q4"
+                },
+                "📊 cost_calculator": {
+                    "description": "Use /calculate_cost endpoint to estimate costs for specific usage",
+                    "example": "POST /calculate_cost with token counts"
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving LLM models: {e}")
+        return {
+            "error": "Models Error",
+            "message": "An error occurred while retrieving model information."
+        }
+
+@app.post("/calculate_cost")
+@trace_async_method(operation_name="api.calculate_cost")
+async def calculate_cost(request: dict):
+    """
+    Calculate cost for specific token usage.
+    
+    Request body:
+    {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "model_name": "gpt-4o-mini"  // optional
+    }
+    """
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info("Cost calculation request")
+    
+    try:
+        # Extract token information
+        prompt_tokens = request.get("prompt_tokens", 0)
+        completion_tokens = request.get("completion_tokens", 0)
+        model_name = request.get("model_name")
+        
+        if prompt_tokens <= 0 and completion_tokens <= 0:
+            return {
+                "error": "Invalid Input",
+                "message": "Please provide valid prompt_tokens and/or completion_tokens"
+            }
+        
+        # Create token usage object
+        token_usage = TokenUsage(
+            prompt_tokens=int(prompt_tokens),
+            completion_tokens=int(completion_tokens),
+            total_tokens=int(prompt_tokens) + int(completion_tokens)
+        )
+        
+        # Calculate costs
+        cost_data = llm_analytics.calculate_cost(token_usage, model_name)
+        
+        return {
+            "status": "success",
+            "calculation": {
+                "🔢 input_tokens": prompt_tokens,
+                "🔢 output_tokens": completion_tokens,
+                "🔢 total_tokens": token_usage.total_tokens,
+                "🤖 model_used": cost_data["model_info"]["detected_model"],
+                "💰 cost_breakdown": cost_data["cost_breakdown"],
+                "📈 projections": cost_data["cost_summary"],
+                "⚡ efficiency": cost_data["token_breakdown"]["token_efficiency"]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating cost: {e}")
+        return {
+            "error": "Calculation Error",
+            "message": "An error occurred while calculating costs."
+        }

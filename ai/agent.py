@@ -19,6 +19,7 @@ from semantic_kernel.contents import ChatMessageContent, AuthorRole
 from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 
 from plugins.graph_plugin import GraphPlugin
+from plugins.azure_maps_plugin import AzureMapsPlugin
 from prompts.graph_prompts import prompts
 from utils.teams_utilities import TeamsUtilities
 
@@ -141,6 +142,10 @@ class Agent:
         # 3. Add the Microsoft Graph plugin with optional debug mode
         self.graph_debug = os.getenv("GRAPH_DEBUG", "false").lower() == "true"
         self.kernel.add_plugin(GraphPlugin(debug=self.graph_debug, session_id=self.session_id), plugin_name="graph")
+        
+        # Add the Azure Maps plugin for location-based searches
+        self.kernel.add_plugin(AzureMapsPlugin(debug=self.graph_debug, session_id=self.session_id), plugin_name="azure_maps")
+        self.logger.info("✅ Azure Maps plugin added for location-based searches")
         # self.kernel.add_plugin(OpenTablePlugin(), plugin_name="open_table")
        
         # 4. Add Azure OpenAI service to the kernel

@@ -49,6 +49,52 @@ class TeamsUtilities:
         # Fire-and-forget: do not await the response
         asyncio.create_task(self._async_post(self.direct_message_url, payload))
     
+    def send_friendly_notification(self, message: str, session_id: str, debug: bool = False):
+        """
+        Send a friendly notification to the user via Teams about what we're working on.
+        
+        Args:
+            message: The notification message to send
+            session_id: The user's session ID
+            debug: Whether to enable debug logging
+        """
+        if session_id:
+            try:
+                # Import telemetry components here to avoid circular imports
+                from telemetry.decorators import TelemetryContext
+                from telemetry.console_output import console_debug, console_telemetry_event
+                
+                # Create payload with correct structure - user_id (snake_case) and message
+                payload = {
+                    "user_id": session_id,
+                    "message": message
+                }
+                
+                # Add telemetry context for Teams messaging
+                with TelemetryContext(operation="teams_notification", session_id=session_id, message=message):
+                    # Console output for notification
+                    try:
+                        console_telemetry_event("teams_notification", {
+                            "session_id": session_id,
+                            "message": message,
+                            "notification_type": "plugin_activity"
+                        }, "teams_utilities")
+                    except Exception as console_error:
+                        if debug:
+                            print(f"DEBUG: Could not record console telemetry: {console_error}")
+                    
+                    # Send the Teams notification
+                    asyncio.create_task(self.send_message_fire_and_forget(payload, session_id))
+                    
+                    if debug:
+                        console_debug(f"Sent Teams notification: {message}", "teams_utilities")
+                        
+            except Exception as e:
+                # Silently ignore notification errors to not interrupt the main flow
+                if debug:
+                    print(f"DEBUG: Could not send notification: {e}")
+                pass
+    
     async def _async_post(self, url: str, data: Dict[str, Any]) -> None:
         """
         Internal method to perform async POST request.
