@@ -395,14 +395,6 @@ class AzureMapsOperations:
                         console_info(f"   • Token preview: {token.token[:20]}...", "AzureMaps")
                         
                         headers["Authorization"] = f"Bearer {token.token}"
-                        
-                        # Add required x-ms-client-id header for Azure Maps managed identity
-                        if self.client_id:
-                            headers["x-ms-client-id"] = self.client_id
-                            console_info(f"   🆔 Added x-ms-client-id header: {self.client_id}", "AzureMaps")
-                        else:
-                            console_error("   ❌ Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
-                        
                         auth_method = "managed_identity"
                         console_info("   🔐 Authorization header set with Bearer token", "AzureMaps")
                     else:
@@ -428,14 +420,6 @@ class AzureMapsOperations:
                         if mi_token and mi_token.token:
                             console_info("   ✅ ManagedIdentityCredential succeeded!", "AzureMaps")
                             headers["Authorization"] = f"Bearer {mi_token.token}"
-                            
-                            # Add required x-ms-client-id header for Azure Maps managed identity
-                            if self.client_id:
-                                headers["x-ms-client-id"] = self.client_id
-                                console_info(f"   🆔 Added x-ms-client-id header: {self.client_id}", "AzureMaps")
-                            else:
-                                console_error("   ❌ Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
-                            
                             auth_method = "managed_identity_explicit"
                         else:
                             console_error("   ❌ ManagedIdentityCredential also failed", "AzureMaps")
@@ -509,12 +493,6 @@ class AzureMapsOperations:
                 None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
             )
             headers["Authorization"] = f"Bearer {token.token}"
-            
-            # Add required x-ms-client-id header for Azure Maps managed identity
-            if self.client_id:
-                headers["x-ms-client-id"] = self.client_id
-            else:
-                console_error("Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
         
         if not self.session:
             self.session = aiohttp.ClientSession()
@@ -588,12 +566,6 @@ class AzureMapsOperations:
                 None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
             )
             headers["Authorization"] = f"Bearer {token.token}"
-            
-            # Add required x-ms-client-id header for Azure Maps managed identity
-            if self.client_id:
-                headers["x-ms-client-id"] = self.client_id
-            else:
-                console_error("Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
 
         if not self.session:
             self.session = aiohttp.ClientSession()
@@ -680,42 +652,7 @@ class AzureMapsOperations:
                     console_info(f"   • Token expires: {token.expires_on}", "AzureMaps")
                     console_info(f"   • Token starts with: {token.token[:30]}...", "AzureMaps")
                     
-                    # Additional token validation
-                    try:
-                        import base64
-                        import json as json_lib
-                        parts = token.token.split('.')
-                        if len(parts) >= 2:
-                            # Decode payload to check audience
-                            payload_data = parts[1]
-                            payload_data += '=' * (4 - len(payload_data) % 4)
-                            decoded_payload = base64.urlsafe_b64decode(payload_data).decode('utf-8')
-                            payload_json = json_lib.loads(decoded_payload)
-                            
-                            audience = payload_json.get('aud', '')
-                            console_info(f"   • Token audience: {audience}", "AzureMaps")
-                            console_info(f"   • Token subject: {payload_json.get('sub', 'N/A')}", "AzureMaps")
-                            console_info(f"   • Token issuer: {payload_json.get('iss', 'N/A')}", "AzureMaps")
-                            
-                            # Verify audience is correct
-                            if "atlas.microsoft.com" in str(audience):
-                                console_info(f"   ✅ Token audience is correct for Azure Maps", "AzureMaps")
-                            else:
-                                console_error(f"   ⚠️  Token audience may be incorrect!", "AzureMaps")
-                                console_error(f"   Expected: https://atlas.microsoft.com", "AzureMaps")
-                                console_error(f"   Actual: {audience}", "AzureMaps")
-                    except Exception as decode_error:
-                        console_info(f"   • Token decode error: {decode_error}", "AzureMaps")
-                    
                     headers["Authorization"] = f"Bearer {token.token}"
-                    
-                    # Add required x-ms-client-id header for Azure Maps managed identity
-                    if self.client_id:
-                        headers["x-ms-client-id"] = self.client_id
-                        console_info(f"   🆔 Added x-ms-client-id header: {self.client_id}", "AzureMaps")
-                    else:
-                        console_error("   ❌ Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
-                    
                     console_info("   🔐 Authorization header configured", "AzureMaps")
                 else:
                     console_error("   ❌ Token acquisition returned None or empty token", "AzureMaps")
@@ -807,72 +744,10 @@ class AzureMapsOperations:
                     console_error(f"   • Response: {error_text}", "AzureMaps")
                     console_error(f"   • Auth method: {'Subscription Key' if self.subscription_key else 'Managed Identity'}", "AzureMaps")
                     if not self.subscription_key:
-                        console_error("   💡 Managed identity 401 troubleshooting:", "AzureMaps")
-                        console_error("     - Token is being acquired but rejected by Azure Maps", "AzureMaps")
-                        console_error("     - This usually means the managed identity lacks proper permissions", "AzureMaps")
-                        console_error("     - Check Azure Portal → Azure Maps → Access Control (IAM)", "AzureMaps")
-                        console_error(f"     - Verify identity 5238e629-da2f-4bb0-aea5-14d45526c864 has 'Azure Maps Data Reader' role", "AzureMaps")
-                        console_error("     - Ensure role assignment scope is the Azure Maps account (not resource group)", "AzureMaps")
-                        console_error("     - Try removing and re-adding the role assignment", "AzureMaps")
-                        console_error("     - Wait 10-15 minutes after role changes for propagation", "AzureMaps")
-                        
-                        # Add token debugging for 401 errors
-                        console_error("   🔍 Token debugging info:", "AzureMaps")
-                        if 'Authorization' in headers:
-                            auth_header = headers['Authorization']
-                            if auth_header.startswith('Bearer '):
-                                token_part = auth_header[7:]  # Remove 'Bearer ' prefix
-                                console_error(f"     - Token length: {len(token_part)} characters", "AzureMaps")
-                                console_error(f"     - Token starts: {token_part[:40]}...", "AzureMaps")
-                                console_error(f"     - Token ends: ...{token_part[-20:]}", "AzureMaps")
-                                
-                                # Try to decode token header to see if it's valid JWT
-                                try:
-                                    import base64
-                                    import json as json_lib
-                                    # JWT tokens have 3 parts separated by dots
-                                    parts = token_part.split('.')
-                                    if len(parts) >= 2:
-                                        # Decode header (first part)
-                                        header_data = parts[0]
-                                        # Add padding if needed
-                                        header_data += '=' * (4 - len(header_data) % 4)
-                                        decoded_header = base64.urlsafe_b64decode(header_data).decode('utf-8')
-                                        header_json = json_lib.loads(decoded_header)
-                                        console_error(f"     - Token type: {header_json.get('typ', 'unknown')}", "AzureMaps")
-                                        console_error(f"     - Algorithm: {header_json.get('alg', 'unknown')}", "AzureMaps")
-                                        
-                                        # Decode payload (second part) for more info
-                                        payload_data = parts[1]
-                                        payload_data += '=' * (4 - len(payload_data) % 4)
-                                        decoded_payload = base64.urlsafe_b64decode(payload_data).decode('utf-8')
-                                        payload_json = json_lib.loads(decoded_payload)
-                                        console_error(f"     - Audience: {payload_json.get('aud', 'unknown')}", "AzureMaps")
-                                        console_error(f"     - Issuer: {payload_json.get('iss', 'unknown')}", "AzureMaps")
-                                        console_error(f"     - Subject: {payload_json.get('sub', 'unknown')}", "AzureMaps")
-                                        
-                                        # Check if the audience is correct for Azure Maps
-                                        expected_audience = "https://atlas.microsoft.com"
-                                        actual_audience = payload_json.get('aud', '')
-                                        if expected_audience not in str(actual_audience):
-                                            console_error(f"     ⚠️  AUDIENCE MISMATCH!", "AzureMaps")
-                                            console_error(f"     - Expected: {expected_audience}", "AzureMaps")
-                                            console_error(f"     - Actual: {actual_audience}", "AzureMaps")
-                                            console_error(f"     - This may be the cause of the 401 error", "AzureMaps")
-                                        else:
-                                            console_error(f"     ✅ Audience looks correct", "AzureMaps")
-                                            
-                                except Exception as decode_error:
-                                    console_error(f"     - Token decode failed: {decode_error}", "AzureMaps")
-                        
-                        console_error("   🔧 Recommended actions:", "AzureMaps")
-                        console_error("     1. Go to Azure Portal → Azure Maps → Access Control (IAM)", "AzureMaps")
-                        console_error("     2. Click 'Role assignments' tab", "AzureMaps")
-                        console_error("     3. Look for your Container App's managed identity", "AzureMaps")
-                        console_error("     4. Verify it has 'Azure Maps Data Reader' role", "AzureMaps")
-                        console_error("     5. Check the scope is the Azure Maps account (not subscription/RG)", "AzureMaps")
-                        console_error("     6. If missing, add the role assignment", "AzureMaps")
-                        console_error("     7. Restart your Container App after changes", "AzureMaps")
+                        console_error("   💡 Managed identity authentication issues:", "AzureMaps")
+                        console_error("     - Token may be invalid or expired", "AzureMaps")
+                        console_error("     - Check managed identity is properly configured", "AzureMaps")
+                        console_error("     - Verify token scope: https://atlas.microsoft.com/.default", "AzureMaps")
                     else:
                         console_error("   💡 Subscription key authentication issues:", "AzureMaps")
                         console_error("     - Check subscription key is valid", "AzureMaps")

@@ -1532,6 +1532,70 @@ Create alerts in Azure Monitor for:
    | where P95Latency > 5000  // Alert if P95 > 5 seconds
    ```
 
+#### Redis Cache Monitoring
+
+**Monitor Redis cache operations and performance:**
+
+**Find all Redis operations:**
+```kusto
+requests
+| where operation_Name in ("redis_connect", "cache_get", "cache_set", "cache_wrapper", "cache_close")
+| where cloud_RoleName == "ai-calendar-assistant"
+| order by timestamp desc
+```
+
+**Monitor get_all_users cache performance:**
+```kusto
+requests  
+| where operation_Name == "get_all_users"
+| where cloud_RoleName == "ai-calendar-assistant"
+| order by timestamp desc
+| project timestamp, duration, operation_Name, customDimensions
+```
+
+**Find cache hit/miss patterns:**
+```kusto
+traces
+| where message contains "Cache" or message contains "Redis"
+| where cloud_RoleName == "ai-calendar-assistant" 
+| order by timestamp desc
+```
+
+**Cache performance comparison (before/after caching):**
+```kusto
+requests
+| where operation_Name == "get_all_users"
+| where cloud_RoleName == "ai-calendar-assistant"
+| summarize AvgDuration = avg(duration), Count = count() by bin(timestamp, 1h)
+| render timechart
+```
+
+**Redis connection health:**
+```kusto
+requests
+| where operation_Name == "redis_connect"
+| summarize SuccessRate = 100.0 * countif(success == true) / count() by bin(timestamp, 5m)
+| render timechart
+```
+
+**Redis telemetry events:**
+```kusto
+customEvents
+| where name in ("redis_connection_attempt", "redis_connection_success", "redis_connection_failed", "redis_status_initialized", "redis_connection_closing", "redis_connection_closed", "redis_connection_close_failed")
+| where cloud_RoleName == "ai-calendar-assistant"
+| order by timestamp desc
+| project timestamp, name, customDimensions
+```
+
+**Redis connection success rate:**
+```kusto
+customEvents
+| where name in ("redis_connection_success", "redis_connection_failed") 
+| where cloud_RoleName == "ai-calendar-assistant"
+| summarize SuccessRate = 100.0 * countif(name == "redis_connection_success") / count() by bin(timestamp, 15m)
+| render timechart
+```
+
 ### Health Monitoring
 
 - **API Health**: Endpoint availability and response times

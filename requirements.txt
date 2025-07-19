@@ -58,6 +58,10 @@ pydantic==2.11.7
 pydantic-core==2.33.2
 pydantic-settings==2.10.1
 
+# Redis Cache Support
+redis==5.2.1
+aioredis==2.0.1
+
 # Utilities and Support Libraries
 requests==2.32.4
 colorama==0.4.6
