@@ -239,6 +239,12 @@ class AzureMapsOperations:
         """Async context manager exit."""
         if self.session:
             await self.session.close()
+    
+    async def close(self):
+        """Close the aiohttp session."""
+        if self.session:
+            await self.session.close()
+            self.session = None
             
     def get_telemetry_status(self) -> Dict[str, Any]:
         """Get comprehensive telemetry status."""
@@ -253,7 +259,7 @@ class AzureMapsOperations:
     @trace_async_method("azure_maps_test_connection")
     async def test_connection(self) -> Dict[str, Any]:
         """Fast connection test for production validation."""
-        console_info("Starting fast connection test", "AzureMaps")
+        console_info("🔗 Starting connection test...", "AzureMaps")
         start_time = datetime.now()
         
         try:
@@ -319,7 +325,7 @@ class AzureMapsOperations:
             
     async def get_poi_categories(self) -> List[Dict[str, Any]]:
         """Get POI categories with fast execution (using POI search)."""
-        console_info("Fetching POI data using search", "AzureMaps")
+        console_info("📋 Fetching POI categories...", "AzureMaps")
         
         # Setup authentication - use URL parameter method
         params = {
@@ -371,9 +377,17 @@ class AzureMapsOperations:
                 console_error(f"Failed to get POI data: {response.status}", "AzureMaps")
                 raise Exception(f"POI search request failed: {response.status}")
                 
-    async def search_nearby(self, latitude: float, longitude: float, radius: int = 10, limit: int = 20) -> Dict[str, Any]:
+    async def search_nearby(self, 
+                           latitude: float, 
+                           longitude: float, 
+                           radius: int = 10, 
+                           limit: int = 20, 
+                           category_set: Optional[List[int]] = None,
+                           brand_set: Optional[List[str]] = None,
+                           country_set: Optional[List[str]] = None,
+                           language: str = "en-US") -> Dict[str, Any]:
         """Search nearby POIs with fast execution."""
-        console_info(f"Searching near {latitude}, {longitude} within {radius}m", "AzureMaps")
+        console_info(f"🔍 Searching near {latitude}, {longitude} within {radius}m...", "AzureMaps")
         
         # Setup authentication and parameters
         params = {
@@ -381,10 +395,20 @@ class AzureMapsOperations:
             "lat": latitude,
             "lon": longitude,
             "radius": radius,
-            "limit": limit
+            "limit": limit,
+            "language": language
         }
-        headers = {}
         
+        # Add optional filters
+        if category_set:
+            params["categorySet"] = ",".join(map(str, category_set))
+        if brand_set:
+            params["brandSet"] = ",".join(brand_set)
+        if country_set:
+            params["countrySet"] = ",".join(country_set)
+        
+        headers = {}
+
         if self.subscription_key:
             # Use subscription key as URL parameter
             params["subscription-key"] = self.subscription_key
@@ -395,12 +419,12 @@ class AzureMapsOperations:
                 None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
             )
             headers["Authorization"] = f"Bearer {token.token}"
-        
+
         if not self.session:
             self.session = aiohttp.ClientSession()
-            
+
         url = f"{self.base_url}/search/nearby/json"
-        
+
         async with self.session.get(url, headers=headers, params=params) as response:
             if response.status == 200:
                 result = await response.json()
@@ -425,11 +449,13 @@ class AzureMapsOperations:
         """
         console_info(f"🗺️ Looking up coordinates for {city}, {state}...", "AzureMaps")
 
-        # Setup authentication and parameters
+        # Setup authentication and parameters for search geocoding
+        # Use the search/address/json endpoint instead of search/geocode/json
         params = {
             "api-version": "1.0",
-            "city": city,
-            "state": state
+            "query": f"{city}, {state}",  # Combined query format
+            "limit": 1,  # Only need the best match
+            "countrySet": "US"  # Limit to US for state searches
         }
         headers = {}
 
@@ -447,13 +473,61 @@ class AzureMapsOperations:
         if not self.session:
             self.session = aiohttp.ClientSession()
 
-        url = f"{self.base_url}/search/geocode/json"
+        # Use the search/address/json endpoint which is more reliable for city/state geocoding
+        url = f"{self.base_url}/search/address/json"
 
-        async with self.session.get(url, headers=headers, params=params) as response:
-            if response.status == 200:
-                result = await response.json()
-                console_info(f"Geolocation result: {result}", "AzureMaps")
-                return result
-            else:
-                console_error(f"Geolocation failed: {response.status}", "AzureMaps")
-                raise Exception(f"Geolocation failed: {response.status}")
+        try:
+            async with self.session.get(url, headers=headers, params=params) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    console_info(f"✅ Successfully geocoded {city}, {state}", "AzureMaps")
+                    
+                    # Check if we have results
+                    results = result.get('results', [])
+                    if not results:
+                        console_warning(f"No results found for {city}, {state}", "AzureMaps")
+                        return None
+                    
+                    # Transform the result to match the expected format
+                    best_match = results[0]
+                    transformed_result = {
+                        "features": [{
+                            "geometry": {
+                                "coordinates": [
+                                    best_match.get('position', {}).get('lon', 0),
+                                    best_match.get('position', {}).get('lat', 0)
+                                ]
+                            },
+                            "properties": {
+                                "address": {
+                                    "formattedAddress": best_match.get('address', {}).get('freeformAddress', f"{city}, {state}"),
+                                    "country": best_match.get('address', {}).get('country', 'United States'),
+                                    "adminDivision": best_match.get('address', {}).get('adminDistricts', [{}])[0].get('name', state) if best_match.get('address', {}).get('adminDistricts') else state,
+                                    "locality": best_match.get('address', {}).get('municipality', city)
+                                },
+                                "confidence": best_match.get('score', 1.0),
+                                "matchCodes": [best_match.get('matchCode', {}).get('confidence', 'High')] if best_match.get('matchCode') else ['High']
+                            }
+                        }]
+                    }
+                    
+                    console_debug(f"Transformed geocoding result: {transformed_result}", "AzureMaps")
+                    return transformed_result
+                    
+                elif response.status == 404:
+                    console_error(f"Azure Maps geocoding endpoint not found (404). Check API endpoint and subscription.", "AzureMaps")
+                    return None
+                elif response.status == 401:
+                    console_error(f"Azure Maps authentication failed (401). Check subscription key or managed identity.", "AzureMaps")
+                    return None
+                elif response.status == 403:
+                    console_error(f"Azure Maps access forbidden (403). Check permissions and subscription status.", "AzureMaps")
+                    return None
+                else:
+                    error_text = await response.text()
+                    console_error(f"Geolocation failed with status {response.status}: {error_text}", "AzureMaps")
+                    return None
+                    
+        except Exception as e:
+            console_error(f"Exception during geocoding: {str(e)}", "AzureMaps")
+            return None
