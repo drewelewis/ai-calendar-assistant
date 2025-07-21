@@ -395,6 +395,14 @@ class AzureMapsOperations:
                         console_info(f"   • Token preview: {token.token[:20]}...", "AzureMaps")
                         
                         headers["Authorization"] = f"Bearer {token.token}"
+                        
+                        # Add required x-ms-client-id header for Azure Maps managed identity
+                        if self.client_id:
+                            headers["x-ms-client-id"] = self.client_id
+                            console_info(f"   🆔 Added x-ms-client-id header: {self.client_id}", "AzureMaps")
+                        else:
+                            console_error("   ❌ Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
+                        
                         auth_method = "managed_identity"
                         console_info("   🔐 Authorization header set with Bearer token", "AzureMaps")
                     else:
@@ -432,6 +440,14 @@ class AzureMapsOperations:
                         if mi_token and mi_token.token:
                             console_info("   ✅ ManagedIdentityCredential succeeded!", "AzureMaps")
                             headers["Authorization"] = f"Bearer {mi_token.token}"
+                            
+                            # Add required x-ms-client-id header for Azure Maps managed identity
+                            if self.client_id:
+                                headers["x-ms-client-id"] = self.client_id
+                                console_info(f"   🆔 Added x-ms-client-id header: {self.client_id}", "AzureMaps")
+                            else:
+                                console_error("   ❌ Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
+                            
                             auth_method = "managed_identity_explicit"
                         else:
                             console_error("   ❌ ManagedIdentityCredential also failed", "AzureMaps")
@@ -505,6 +521,12 @@ class AzureMapsOperations:
                 None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
             )
             headers["Authorization"] = f"Bearer {token.token}"
+            
+            # Add required x-ms-client-id header for Azure Maps managed identity
+            if self.client_id:
+                headers["x-ms-client-id"] = self.client_id
+            else:
+                console_error("Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
         
         if not self.session:
             self.session = aiohttp.ClientSession()
@@ -578,6 +600,12 @@ class AzureMapsOperations:
                 None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
             )
             headers["Authorization"] = f"Bearer {token.token}"
+            
+            # Add required x-ms-client-id header for Azure Maps managed identity
+            if self.client_id:
+                headers["x-ms-client-id"] = self.client_id
+            else:
+                console_error("Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
 
         if not self.session:
             self.session = aiohttp.ClientSession()
@@ -665,6 +693,14 @@ class AzureMapsOperations:
                     console_info(f"   • Token starts with: {token.token[:30]}...", "AzureMaps")
                     
                     headers["Authorization"] = f"Bearer {token.token}"
+                    
+                    # Add required x-ms-client-id header for Azure Maps managed identity
+                    if self.client_id:
+                        headers["x-ms-client-id"] = self.client_id
+                        console_info(f"   🆔 Added x-ms-client-id header: {self.client_id}", "AzureMaps")
+                    else:
+                        console_error("   ❌ Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
+                    
                     console_info("   🔐 Authorization header configured", "AzureMaps")
                 else:
                     console_error("   ❌ Token acquisition returned None or empty token", "AzureMaps")
