@@ -1513,14 +1513,14 @@ async def main():
 
 
     # print("Get User Mailbox Settings by User ID")
-    # mailbox_settings = await ops.get_user_mailbox_settings_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
+    # mailbox_settings = await ops.get_user_mailbox_settings_by_user_id("12345678-1234-1234-1234-123456789abc")
     # if mailbox_settings:
     #     for key, value in mailbox_settings.items():
     #         print(f"{key}: {value}")
     # print(60 * "=")
 
     # print("Get User Preferences by User ID")
-    # preferences = await ops.get_user_preferences_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
+    # preferences = await ops.get_user_preferences_by_user_id("12345678-1234-1234-1234-123456789abc")
     # if preferences:
     #     for key, value in preferences.__dict__.items():
     #         print(f"{key}: {value}")
@@ -1531,7 +1531,7 @@ async def main():
     # print(60 * "=")
     # print("Get User by User ID")
     # print(60 * "=")
-    # user_id = "69149650-b87e-44cf-9413-db5c1a5b6d3f"  # Example user ID
+    # user_id = "12345678-1234-1234-1234-123456789abc"  # Example user ID
     # user = await ops.get_user_by_user_id(user_id)
     # print(60 * "=")
     # print(f"ID: {user.id}")
@@ -1565,7 +1565,7 @@ async def main():
     # print(60 * "=")
     # print("Getting the system administrator's manager...")
     # print(60 * "=")
-    # user = await ops.get_users_manager_by_user_id("69149650-b87e-44cf-9413-db5c1a5b6d3f")
+    # user = await ops.get_users_manager_by_user_id("12345678-1234-1234-1234-123456789abc")
     # print(60 * "=")
     # print(f"ID: {user.id}")
     # print(f"Given Name: {user.given_name}")
@@ -1579,9 +1579,9 @@ async def main():
 
     # # Get Prita's Direct Reports
     # print(60 * "=")
-    # print("Getting Prita's (IT Manager) direct reports...")
+    # print("Getting manager's direct reports...")
     # print(60 * "=")
-    # direct_reports = await ops.get_direct_reports_by_user_id("5d6bc6b4-4294-4994-8206-8be6ee865407")
+    # direct_reports = await ops.get_direct_reports_by_user_id("87654321-4321-4321-4321-987654321def")
     # for user in direct_reports:
     #     print(60 * "=")
     #     print(f"ID: {user.id}")
@@ -1616,7 +1616,7 @@ async def main():
     # print(60 * "=")
     # print("Getting events for user by user ID...")
     # print(60 * "=")
-    # user_id = "69149650-b87e-44cf-9413-db5c1a5b6d3f"  # Example user ID
+    # user_id = "12345678-1234-1234-1234-123456789abc"  # Example user ID
     
     # # Example with date range (ISO 8601 format)
     # start_date = "2025-07-01T00:00:00Z"  # Start of July 2025

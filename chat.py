@@ -36,7 +36,7 @@ maintained in a ChatHistoryAgentThread object and persisted in Azure CosmosDB.
 
 # Sample user inputs to demonstrate the AI calendar assistant functionality
 # USER_INPUTS = [
-#     "Logging in as user Id 69149650-b87e-44cf-9413-db5c1a5b6d3f",
+#     "Logging in as user Id 12345678-1234-1234-1234-123456789abc",
 #     "Who is our CEO?",
 #     "Can you get me the full org chart of our organization?",
 #     "Can you get me a list of all departments in our organization?",

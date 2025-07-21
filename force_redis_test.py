@@ -67,7 +67,7 @@ async def test_redis_with_graph_calls():
         # Call 2: Get user by ID (should trigger Redis connection if not already connected)
         print("📞 Calling get_user_by_user_id()...")
         try:
-            user_id = "69149650-b87e-44cf-9413-db5c1a5b6d3f"  # Your session ID as user ID
+            user_id = "12345678-1234-1234-1234-123456789abc"  # Example user ID
             user = await graph_ops.get_user_by_user_id(user_id)
             print(f"   ✅ Retrieved user data")
         except Exception as e:
