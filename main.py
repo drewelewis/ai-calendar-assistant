@@ -15,7 +15,8 @@ if __name__ == "__main__":
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
     service_name = os.getenv("TELEMETRY_SERVICE_NAME", "ai-calendar-assistant")
     service_version = os.getenv("TELEMETRY_SERVICE_VERSION", "1.0.0")
-    
+    uvicorn_timeout = os.getenv("UVICORN_TIMEOUT", "60")
+
     # Initialize telemetry - it reads connection_string from environment
     telemetry_success = initialize_telemetry(
         service_name=service_name,

@@ -168,7 +168,6 @@ class Agent:
         self.agent = ChatCompletionAgent(
             kernel=self.kernel,
             name="Agent",
-            instructions=combined_instructions,
             arguments=KernelArguments(settings=self.settings),
         )
         

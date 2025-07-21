@@ -401,6 +401,18 @@ class AzureMapsOperations:
                         console_error("   ❌ Token acquisition returned None", "AzureMaps")
                         raise Exception("Token acquisition failed - no token returned")
                         
+                except ClientAuthenticationError as auth_error:
+                    console_error(f"   ❌ Managed identity authentication failed: {auth_error}", "AzureMaps")
+                    console_error(f"   • Error type: {type(auth_error).__name__}", "AzureMaps")
+                    console_error("   💡 Production troubleshooting steps:", "AzureMaps")
+                    console_error("     1. Check if system-assigned managed identity is enabled:", "AzureMaps")
+                    console_error("        az containerapp show --resource-group <rg> --name <app> --query identity.principalId", "AzureMaps")
+                    console_error("     2. If empty, enable managed identity:", "AzureMaps")
+                    console_error("        az containerapp identity assign --name <app> --resource-group <rg> --system-assigned", "AzureMaps")
+                    console_error("     3. Assign Azure Maps Data Reader role:", "AzureMaps")
+                    console_error("        az role assignment create --assignee <principalId> --role 'Azure Maps Data Reader' --scope <mapsScope>", "AzureMaps")
+                    console_error("     4. Restart the Container App after role assignment", "AzureMaps")
+                    raise Exception(f"Managed identity authentication failed: {auth_error}")
                 except Exception as token_error:
                     console_error(f"   ❌ Token acquisition failed: {token_error}", "AzureMaps")
                     console_error(f"   • Error type: {type(token_error).__name__}", "AzureMaps")

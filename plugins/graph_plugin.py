@@ -717,12 +717,25 @@ class GraphPlugin:
         - Meeting details: subject, time, attendees, location
         - Room availability status and usage patterns
         
+        CAPABILITIES:
+        - Optional date range filtering (start/end dates)
+        - Comprehensive event details including attendees
+        - Enhanced error handling for calendar access issues
+        
         COMMON USE CASES:
         - "Show me conference room availability"
         - "Which meeting rooms are booked today?"
         - "What's the conference room usage status?"
         - "Are there any available conference rooms?"
         - "Show me all room bookings"
+        - "Check conference room availability for this week"
+        - "Show me room bookings for July 2025"
+        
+        DATE FILTERING EXAMPLES:
+        - start_date: "2025-07-01T00:00:00Z" (July 1st, 2025)
+        - end_date: "2025-07-31T23:59:59Z" (End of July 2025)
+        - For today's events: use current date
+        - For this week: use Monday to Sunday range
         
         SCHEDULING SCENARIOS:
         - Finding available rooms for immediate meetings
@@ -733,7 +746,7 @@ class GraphPlugin:
         
         DETAILED INFORMATION INCLUDES:
         - Room basic info (name, email, capacity)
-        - All calendar events per room
+        - All calendar events per room (within date range if specified)
         - Event details (subject, start/end times, attendees)
         - Meeting organizer and participant information
         
@@ -742,22 +755,49 @@ class GraphPlugin:
         - Use get_all_conference_rooms() for just room list
         - Use get_calendar_events() for specific user calendars
         
-        NOTE: This provides the most complete conference room usage picture
+        NOTE: This provides the most complete conference room usage picture with optional date filtering
         """
     )
-    async def get_conference_room_events(self, max_results: Annotated[int, "Maximum number of conference rooms to scan for events (default: 100)"] = 100) -> Annotated[List[dict], "Returns detailed information about conference rooms and their calendar events."]:
-        self._log_function_call("get_conference_room_events", max_results=max_results)
+    async def get_conference_room_events(self, max_results: Annotated[int, "Maximum number of conference rooms to scan for events (default: 100)"] = 100, start_date: Annotated[str, "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[str, "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns detailed information about conference rooms and their calendar events."]:
+        self._log_function_call("get_conference_room_events", max_results=max_results, start_date=start_date, end_date=end_date)
         self._send_friendly_notification("📅 Checking conference room availability and bookings...")
         if max_results <= 0: raise ValueError("Error: max_results must be greater than 0")
         if max_results > 1000: raise ValueError("Error: max_results cannot exceed 1000")
+        
+        # Convert string dates to datetime objects if provided
+        start_datetime = None
+        end_datetime = None
+        
+        if start_date:
+            try:
+                # Try parsing ISO 8601 format with timezone
+                if start_date.endswith('Z'):
+                    start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                else:
+                    start_datetime = datetime.fromisoformat(start_date)
+            except ValueError as e:
+                print(f"Error parsing start_date '{start_date}': {e}")
+                start_datetime = None
+                
+        if end_date:
+            try:
+                # Try parsing ISO 8601 format with timezone
+                if end_date.endswith('Z'):
+                    end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                else:
+                    end_datetime = datetime.fromisoformat(end_date)
+            except ValueError as e:
+                print(f"Error parsing end_date '{end_date}': {e}")
+                end_datetime = None
+        
         try:
             # Get all conference rooms
             conference_rooms = await graph_operations.get_all_conference_rooms(max_results)
             if not conference_rooms:
                 return []
             
-            # Use the new method to get conference room events data
-            conference_rooms_with_events = await graph_operations.get_conference_room_events(conference_rooms)
+            # Use the new method to get conference room events data with date filtering
+            conference_rooms_with_events = await graph_operations.get_conference_room_events(conference_rooms, start_datetime, end_datetime)
             return conference_rooms_with_events
         except Exception as e:
             print(f"Error in get_conference_room_events: {e}")
@@ -977,10 +1017,12 @@ class GraphPlugin:
         self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end, 
                               location=location, attendees=attendees, optional_attendees=optional_attendees)
         self._send_friendly_notification("✨ Creating new calendar event and sending invitations...")
+        
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         if not subject or not subject.strip(): raise ValueError("Error: subject parameter is empty")
         if not start or not start.strip(): raise ValueError("Error: start parameter is empty")
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
+        
         try:
             return await graph_operations.create_calendar_event(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
@@ -1002,6 +1044,12 @@ class GraphPlugin:
         - Setting up relative date ranges (e.g., "from now until next week")
         - Time-sensitive operations requiring precise timing
         
+        CRITICAL WORKFLOW REQUIREMENT:
+        - ALL calendar and date-related kernel functions should call this function FIRST
+        - This ensures consistent time reference across all operations
+        - Required before: create_calendar_event, get_calendar_events, get_conference_room_events
+        - Use the returned timestamp for validation, comparison, and reference
+        
         RETURNS:
         - Current date and time in ISO 8601 format
         - UTC timezone for consistent scheduling
@@ -1012,16 +1060,25 @@ class GraphPlugin:
         - Reference point for "schedule meeting for 2 hours from now"
         - Setting start times for immediate meetings
         - Date calculations and relative scheduling
+        - Time validation before creating events
         
         CALENDAR INTEGRATION:
         - Use this timestamp as reference for event creation
         - Essential for "schedule now" or "immediate meeting" requests
         - Provides standardized time format for all calendar operations
+        - Validates against past dates when scheduling meetings
         
         TIME CALCULATIONS:
         - Base for "in 1 hour", "tomorrow at this time" calculations
         - Reference for duration-based scheduling
         - Ensures consistent timezone handling
+        
+        DEPENDENCY PATTERN:
+        - Other kernel functions should call this first to establish time context
+        - Example: get_current_datetime() → create_calendar_event()
+        - Example: get_current_datetime() → get_calendar_events() with relative dates
+        - Example: get_current_datetime() → get_conference_room_events() with date range
+
         
         NOTE: Always returns UTC time for global organization coordination
         """

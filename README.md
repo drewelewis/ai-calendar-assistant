@@ -387,7 +387,40 @@ AZURE_MAPS_SUBSCRIPTION_KEY=your-subscription-key
 
 # Managed Identity (recommended for production)
 AZURE_MAPS_CLIENT_ID=your-managed-identity-client-id
+AZURE_MAPS_ACCOUNT_NAME=your-maps-account-name
 ```
+
+> **⚠️ CRITICAL: Azure Maps Managed Identity Configuration**
+> 
+> Unlike most Azure services, Azure Maps requires **TWO configuration steps** for managed identity authentication:
+> 
+> 1. **✅ Role Assignment**: Assign "Azure Maps Data Reader" role to your managed identity
+> 2. **🔧 Account Configuration**: Enable Azure AD authentication on the Azure Maps account
+> 
+> **Common 401 Error Fix:**
+> ```bash
+> # Step 1: Check current authentication mode
+> az maps account show --name YOUR_MAPS_ACCOUNT --resource-group YOUR_RG --query "properties.disableLocalAuth"
+> 
+> # Step 2: Enable Azure AD authentication (CRITICAL!)
+> az maps account update --name YOUR_MAPS_ACCOUNT --resource-group YOUR_RG --sku S1 --disable-local-auth true
+> 
+> # Step 3: Assign role (if not already done)
+> az role assignment create --assignee YOUR_MANAGED_IDENTITY_ID --role "Azure Maps Data Reader" --scope "/subscriptions/YOUR_SUBSCRIPTION/resourceGroups/YOUR_RG/providers/Microsoft.Maps/accounts/YOUR_MAPS_ACCOUNT"
+> 
+> # Step 4: Restart your container app
+> az containerapp restart --name YOUR_CONTAINER_APP --resource-group YOUR_RG
+> ```
+> 
+> **Why This is Required:**
+> - Azure Maps accounts default to subscription key authentication only
+> - Setting `--disable-local-auth true` forces the account to accept managed identity tokens
+> - Without this configuration, you'll get 401 errors even with correct role assignments
+> 
+> **For Production Deployment:**
+> - Remove or comment out `AZURE_MAPS_SUBSCRIPTION_KEY` from environment variables
+> - Keep `AZURE_MAPS_CLIENT_ID` and `AZURE_MAPS_ACCOUNT_NAME` for reference
+> - Ensure your Azure Container App has system-assigned managed identity enabled
 
 **Performance Optimizations:**
 - **Request Caching:** Intelligent caching to reduce API calls
@@ -728,6 +761,7 @@ AZURE_TENANT_ID=your-tenant-id
 # Azure Maps (for location services)
 AZURE_MAPS_CLIENT_ID=your-maps-client-id
 AZURE_MAPS_SUBSCRIPTION_KEY=your-maps-key
+AZURE_MAPS_ACCOUNT_NAME=your-maps-account-name
 
 # Azure CosmosDB (Optional - for chat persistence)
 COSMOS_ENDPOINT=https://your-cosmosdb.documents.azure.com:443/
@@ -1698,6 +1732,39 @@ az account show
 # Check application permissions
 az ad app permission list --id your-app-id
 ```
+
+**Azure Maps 401 Errors**
+
+*"Unauthorized" errors from Azure Maps API:*
+1. **Check Account Configuration**: Azure Maps requires special managed identity setup
+   ```bash
+   # Check if local auth is disabled (should be true for managed identity)
+   az maps account show --name YOUR_MAPS_ACCOUNT --resource-group YOUR_RG --query "properties.disableLocalAuth"
+   ```
+
+2. **Enable Azure AD Authentication**: This is the most common fix
+   ```bash
+   # Enable managed identity authentication (replace S1 with your SKU)
+   az maps account update --name YOUR_MAPS_ACCOUNT --resource-group YOUR_RG --sku S1 --disable-local-auth true
+   ```
+
+3. **Verify Role Assignment**: Ensure managed identity has proper permissions
+   ```bash
+   # List current role assignments
+   az role assignment list --assignee YOUR_MANAGED_IDENTITY_ID --all --output table
+   
+   # Should include "Azure Maps Data Reader" role
+   ```
+
+4. **Restart Container App**: Required after configuration changes
+   ```bash
+   az containerapp restart --name YOUR_CONTAINER_APP --resource-group YOUR_RG
+   ```
+
+*Environment Configuration Issues:*
+- Ensure `AZURE_MAPS_SUBSCRIPTION_KEY` is commented out for production
+- Verify `AZURE_MAPS_ACCOUNT_NAME` matches your actual Azure Maps account name
+- Check that managed identity is enabled on your Container App
 
 **Token Tracking Issues**
 

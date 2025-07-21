@@ -1,4 +1,6 @@
 @echo off
+chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
 echo 🚀 AI Calendar Assistant - Build and Push Pipeline
 echo ================================================
 echo.
