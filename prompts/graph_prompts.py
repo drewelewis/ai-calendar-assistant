@@ -11,7 +11,7 @@ class M365Prompts:
 
     def __init__(self):
         # Example prompts, add or modify as needed
-        self._current_datetime_prompt = f'The current datetime is: {datetime.now().isoformat()}'
+
         self._system_prompt = (
             """
                 SYSTEM INSTRUCTIONS:
@@ -151,10 +151,6 @@ class M365Prompts:
         """Returns the login prompt with session ID."""
         return f'The current logged in user_id is: {session_id}'
 
-    def current_datetime_prompt(self):
-        """Returns the current datetime prompt."""
-        return self._current_datetime_prompt
-
     def system_prompt(self):
         """Returns just the system prompt."""
         return self._system_prompt
@@ -164,7 +160,6 @@ class M365Prompts:
         return (
             f"{self._system_prompt}\n"
             f"{self.login_prompt(session_id)}\n"
-            f"{self.current_datetime_prompt()}\n\n"
             f"{self._instructions}"
         )
 

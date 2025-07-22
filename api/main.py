@@ -1,4 +1,5 @@
 import re
+from urllib import request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,6 +10,7 @@ from models.chat_models import ChatModels
 from ai.agent import Agent
 from ai.multi_agent import MultiAgentOrchestrator
 from utils.llm_analytics import llm_analytics, TokenUsage
+from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 
 # Import telemetry components
 from telemetry.config import initialize_telemetry, get_telemetry
@@ -282,3 +284,59 @@ async def calculate_cost(request: dict):
             "error": "Calculation Error",
             "message": "An error occurred while calculating costs."
         }
+# clear chat history endpoint
+@app.post("/clear_chat_history")
+@trace_async_method(operation_name="api.clear_chat_history")
+async def clear_chat_history(session: ChatModels.Session):
+    """Clear chat history for the user
+    Request body:
+    {
+        "session_id": "abcd1234-5678-90ef-ghij-klmnopqrstuv"  # required, if you want to clear history for a specific session
+
+    }
+    """
+    # get session_id from request body
+    session_id = session.session_id
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info("Clear chat history request")
+    
+    try:
+        # TODO: Implement chat history clearing logic here
+        # For now, return success as placeholder
+        # This should call CosmosDBChatHistoryManager or similar to clear history
+        cosmos_manager = await get_cosmos_manager()
+        # Clear chat history for a specific session or all sessions
+        # For example, clear history for a specific session ID
+        await cosmos_manager.clear_chat_history(session_id=session_id)  # Pass session_id if needed
+        return {
+            "status": "success",
+            "message": "Chat history cleared successfully."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error clearing chat history: {e}")
+        return {
+            "error": "Clear History Error",
+            "message": "An error occurred while clearing chat history."
+        }   
+
+async def get_cosmos_manager():
+    cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
+    cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
+    cosmos_container = os.getenv("COSMOS_CONTAINER", "ChatHistory")
+
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info(f"Getting CosmosDBChatHistoryManager with endpoint: {cosmos_endpoint}, database: {cosmos_database}, container: {cosmos_container}")
+
+    # Initialize CosmosDBChatHistoryManager
+    cosmos_manager = CosmosDBChatHistoryManager(
+        endpoint=cosmos_endpoint,
+        database_name=cosmos_database,
+        container_name=cosmos_container
+    )
+
+    return cosmos_manager
+
+        

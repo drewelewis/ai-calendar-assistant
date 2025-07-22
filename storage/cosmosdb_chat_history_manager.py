@@ -227,6 +227,42 @@ class CosmosDBChatHistoryManager:
         except Exception as e:
             print(f"Error loading chat history from CosmosDB: {e}")
             return None
+    
+    async def clear_chat_history(self, session_id):
+        """
+        Clear chat history from Cosmos DB for a specific session.
+        
+        Args:
+            session_id: Session ID to clear chat history for (required)
+        
+        Returns:
+            int: Number of items deleted
+        """
+        try:
+            deleted_count = 0
+            
+            # Clear specific session
+            print(f"Clearing chat history for session ID: {session_id}")
+            query = f"SELECT c.id, c.sessionId FROM c WHERE c.sessionId = '{session_id}'"
+            items = list(self.container.query_items(query=query, enable_cross_partition_query=True))
+            
+            if not items:
+                print(f"No chat history found for session ID: {session_id}")
+                return 0
+            
+            for item in items:
+                try:
+                    self.container.delete_item(item=item['id'], partition_key=item['sessionId'])
+                    deleted_count += 1
+                except Exception as delete_error:
+                    print(f"Warning: Could not delete item {item['id']}: {delete_error}")
+                    
+            print(f"Cleared {deleted_count} chat history records for session {session_id}")
+            return deleted_count
+            
+        except Exception as e:
+            print(f"Error clearing chat history from CosmosDB: {e}")
+            return 0
         
     async def create_hydrated_thread(self, kernel, session_id):
         """
@@ -365,3 +401,4 @@ class CosmosDBChatHistoryManager:
             print(f"Error hydrating thread: {e}")
             print("Returning empty thread")
             return thread
+
