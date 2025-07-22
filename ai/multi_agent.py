@@ -18,6 +18,7 @@ from semantic_kernel.contents import ChatMessageContent, AuthorRole
 from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 from plugins.graph_plugin import GraphPlugin
 from plugins.azure_maps_plugin import AzureMapsPlugin
+from plugins.risk_plugin import RiskPlugin
 from prompts.graph_prompts import prompts
 from utils.teams_utilities import TeamsUtilities
 
@@ -165,6 +166,7 @@ You are the Proxy Agent for an AI Calendar Assistant. Your role is to:
 - Calendar operations (scheduling, events, availability) → @CalendarAgent
 - User searches, directory lookups, organizational data → @DirectoryAgent  
 - Location searches, nearby places, maps → @LocationAgent
+- Client risk analysis, financial exposure, risk metrics → @RiskAgent
 - General conversation, clarification, summary → Handle yourself
 
 **Communication Style:**
@@ -300,6 +302,54 @@ Session ID: {self.session_id}
             arguments=KernelArguments(settings=self.settings),
         )
         
+        # 5. Risk Agent - Handles client risk management and financial analysis
+        risk_kernel = Kernel()
+        risk_kernel.add_service(self.kernel.get_service(self.service_id))
+        risk_kernel.add_plugin(RiskPlugin(debug=False, session_id=self.session_id), plugin_name="risk")
+        
+        risk_instructions = f"""
+You are the Risk Agent, specialized in client risk management and financial analysis. Your expertise includes:
+
+**Core Capabilities:**
+- Client risk profile analysis and assessment
+- Financial exposure and credit risk evaluation
+- Portfolio risk distribution analysis
+- Client search and identification by name or ID
+- Risk rating categorization and insights
+- Compliance status monitoring
+
+**Available Functions:**
+- get_client_summary_by_id: Comprehensive client risk profiles
+- get_client_risk_metrics: Detailed financial exposure and risk data
+- list_all_clients: Directory of all available clients
+- search_clients_by_name: Find clients by name or partial match
+- get_portfolio_risk_overview: Portfolio-wide risk analysis and distribution
+
+**Response Style:**
+- Provide detailed financial risk analysis with context
+- Explain risk ratings and their implications
+- Offer insights into exposure patterns and trends
+- Suggest risk mitigation strategies when appropriate
+- Present data in clear, actionable formats
+- Highlight critical risk factors and red flags
+
+**Specialized Knowledge:**
+- Understanding of financial instruments and derivatives
+- Knowledge of regional risk factors (US, Europe, etc.)
+- Industry-specific risk patterns (banking, hedge funds, etc.)
+- Credit risk assessment methodologies
+- Portfolio diversification principles
+
+Session ID: {self.session_id}
+"""
+        
+        agents['risk'] = ChatCompletionAgent(
+            kernel=risk_kernel,
+            name="RiskAgent",
+            instructions=risk_instructions,
+            arguments=KernelArguments(settings=self.settings),
+        )
+        
         self.logger.info(f"✅ Created {len(agents)} specialized agents")
         return agents
     
@@ -310,13 +360,14 @@ Session ID: {self.session_id}
             self.agents['proxy'],
             self.agents['calendar'], 
             self.agents['directory'],
-            self.agents['location']
+            self.agents['location'],
+            self.agents['risk']
         ]
         
-        # Create the group chat
+        # Create the group chat without custom selection strategy for now
+        # The default selection strategy will be used
         group_chat = AgentGroupChat(
-            agents=agent_list,
-            selection_strategy=self._agent_selection_strategy
+            agents=agent_list
         )
         
         self.logger.info("✅ Agent group chat created")
@@ -357,6 +408,14 @@ Session ID: {self.session_id}
             'map', 'address', 'directions', 'close to', 'near'
         ]):
             return self.agents['location']
+        
+        elif any(keyword in last_message for keyword in [
+            'risk', 'client', 'exposure', 'credit risk', 'portfolio', 
+            'financial', 'lcole', 'meridian', 'quantum', 'hedge fund',
+            'investment bank', 'risk rating', 'compliance', 'risk analysis',
+            'risk profile', 'risk metrics', 'commitment', 'derivatives'
+        ]):
+            return self.agents['risk']
         
         else:
             # Default to proxy agent for general conversation
@@ -409,24 +468,117 @@ Session ID: {self.session_id}
         # Process with agent group chat
         with TelemetryContext(operation="multi_agent_response", message_length=len(message)):
             try:
-                # Create user message
+                # Skip the complex thread type conversion - work with what we have
+                # Just ensure the thread has the basic attributes the AgentGroupChat needs
+                
+                # If we got a list from the fallback case, convert to a proper thread
+                if isinstance(thread, list):
+                    from semantic_kernel.agents import ChatHistoryAgentThread  
+                    new_thread = ChatHistoryAgentThread()
+                    thread = new_thread
+                
+                # AgentGroupChat may expect additional attributes on the thread
+                # Add common attributes that group chats might need
+                if not hasattr(thread, 'name'):
+                    thread.name = f"multi_agent_thread_{self.session_id}"
+                
+                # Add get_channel_keys method if it doesn't exist
+                if not hasattr(thread, 'get_channel_keys'):
+                    def get_channel_keys():
+                        # Return channel keys based on the agents in the group chat
+                        # Each agent can be considered a channel
+                        return [agent.name for agent in self.group_chat.agents]
+                    thread.get_channel_keys = get_channel_keys
+                
+                # Add create_channel method if it doesn't exist
+                if not hasattr(thread, 'create_channel'):
+                    def create_channel(agents=None):
+                        # Create a simple channel representation
+                        # Return a mock channel object or the thread itself
+                        # If no agents provided, use the group chat agents
+                        if agents is None:
+                            agents = self.group_chat.agents
+                        return thread
+                    thread.create_channel = create_channel
+                
+                # Add other potential missing methods
+                if not hasattr(thread, 'channel_id'):
+                    thread.channel_id = self.session_id
+                
+                # Add message to thread - keep it simple
+                # The AgentGroupChat will handle the conversation flow
+                # Just ensure we have a basic message to work with
                 user_message = ChatMessageContent(
                     role=AuthorRole.USER,
                     content=message
                 )
                 
-                # Add to thread if it's a list
-                if isinstance(thread, list):
-                    thread.append(user_message)
-                    # Get response from the agent group using the messages
-                    response = await self.group_chat.invoke([user_message])
-                else:
-                    # For CosmosDB hydrated threads, use the existing method
-                    await thread.add_chat_message(user_message)
-                    response = await self.group_chat.invoke(thread)
+                # Now invoke the group chat - use the correct async generator pattern
+                response_content = ""
+                try:
+                    # NEW APPROACH: Skip AgentGroupChat.invoke() entirely
+                    # Use a simple routing approach instead
+                    
+                    self.logger.debug("Using direct agent routing approach")
+                    
+                    # Create a simple history with just the current message for selection
+                    user_message = ChatMessageContent(
+                        role=AuthorRole.USER,
+                        content=message
+                    )
+                    history = [user_message]
+                    
+                    # Determine which agent should handle this message
+                    selected_agent = await self._agent_selection_strategy(list(self.agents.values()), history)
+                    self.logger.debug(f"Selected agent: {selected_agent.name}")
+                    
+                    # Add the message to the thread if possible
+                    if hasattr(thread, 'add_message'):
+                        thread.add_message(user_message)
+                    
+                    # Use the agent's get_response method instead of calling the chat service directly
+                    # This is the proper way to interact with ChatCompletionAgent
+                    response = await selected_agent.get_response(
+                        messages=message,
+                        thread=thread
+                    )
+                    
+                    # Extract the response content
+                    if hasattr(response, 'value'):
+                        response_content = response.value
+                    elif hasattr(response, 'content'):
+                        response_content = response.content
+                    else:
+                        response_content = str(response)
+                    
+                    # If response_content is a ChatMessageContent object, extract the actual content
+                    if hasattr(response_content, 'content'):
+                        response_content = response_content.content
+                    elif not isinstance(response_content, str):
+                        response_content = str(response_content)
+                    
+                    # Update the thread with the response thread
+                    if hasattr(response, 'thread'):
+                        thread = response.thread
+                    
+                    self.logger.debug(f"Got response: {response_content[:100] if len(response_content) > 100 else response_content}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in direct agent processing: {e}")
+                    import traceback
+                    self.logger.error(f"Traceback: {traceback.format_exc()}")
+                    
+                    # Fallback to a simple response
+                    response_content = "I apologize, but I'm having trouble processing your request right now. Please try again or rephrase your question."
+                except Exception as e:
+                    self.logger.error(f"Error with async generator invoke: {e}")
+                    import traceback
+                    self.logger.error(f"Traceback: {traceback.format_exc()}")
+                    response_content = "Error invoking agent group chat."
                 
-                # Extract the response content
-                response_content = response.content if hasattr(response, 'content') else str(response)
+                # If no responses were generated, provide a fallback
+                if not response_content:
+                    response_content = "I understand your request, but I'm having trouble generating a response. Please try again or rephrase your question."
                 
                 self.logger.info(f"Generated multi-agent response for session: {self.session_id}")
                 

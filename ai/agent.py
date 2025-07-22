@@ -20,6 +20,7 @@ from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 
 from plugins.graph_plugin import GraphPlugin
 from plugins.azure_maps_plugin import AzureMapsPlugin
+from plugins.risk_plugin import RiskPlugin
 from prompts.graph_prompts import prompts
 from utils.teams_utilities import TeamsUtilities
 
@@ -146,6 +147,10 @@ class Agent:
         # Add the Azure Maps plugin for location-based searches
         self.kernel.add_plugin(AzureMapsPlugin(debug=self.graph_debug, session_id=self.session_id), plugin_name="azure_maps")
         self.logger.info("✅ Azure Maps plugin added for location-based searches")
+        
+        # Add the Risk Management plugin for client risk analysis
+        self.kernel.add_plugin(RiskPlugin(debug=self.graph_debug, session_id=self.session_id), plugin_name="risk")
+        self.logger.info("✅ Risk Management plugin added for client risk analysis")
         # self.kernel.add_plugin(OpenTablePlugin(), plugin_name="open_table")
        
         # 4. Add Azure OpenAI service to the kernel

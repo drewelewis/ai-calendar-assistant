@@ -38,7 +38,10 @@ if __name__ == "__main__":
             host="0.0.0.0",
             port=8989,
             log_level="debug",
-            reload=False,)
+            reload=False,
+            timeout_keep_alive=int(uvicorn_timeout),
+            timeout_graceful_shutdown=30,
+            access_log=True)
     except Exception as e:
         console_error(f"Unable to start the uvicorn server: {e}", "MAIN")
         if telemetry_success:

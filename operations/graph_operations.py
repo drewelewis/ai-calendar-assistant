@@ -359,14 +359,55 @@ class GraphOperations:
         # Create a deterministic hash of the method name and parameters
         key_parts = [method_name]
         
-        # Add positional arguments
-        for arg in args:
-            if isinstance(arg, (str, int, float, bool)):
-                key_parts.append(str(arg))
-            elif isinstance(arg, datetime):
-                key_parts.append(arg.isoformat())
-            else:
-                key_parts.append(str(hash(str(arg))))
+        # Special handling for methods that need parameter normalization for consistent caching
+        if method_name in ["get_all_users", "get_users_by_department", "search_users"]:
+            # These methods have max_results and exclude_inactive_mailboxes parameters
+            # Always normalize max_results to 100 for consistent caching
+            normalized_args = list(args)
+            if len(normalized_args) > 0:
+                # For get_all_users: args[0] = max_results
+                # For get_users_by_department: args[0] = department, args[1] = max_results  
+                # For search_users: args[0] = filter, args[1] = max_results
+                if method_name == "get_all_users":
+                    normalized_args[0] = 100  # max_results
+                elif method_name == "get_users_by_department" and len(normalized_args) > 1:
+                    normalized_args[1] = 100  # max_results (department stays as-is)
+                elif method_name == "search_users" and len(normalized_args) > 1:
+                    normalized_args[1] = 100  # max_results (filter stays as-is)
+            
+            # Add normalized positional arguments
+            for arg in normalized_args:
+                if isinstance(arg, (str, int, float, bool)):
+                    key_parts.append(str(arg))
+                elif isinstance(arg, datetime):
+                    key_parts.append(arg.isoformat())
+                else:
+                    key_parts.append(str(hash(str(arg))))
+                    
+        elif method_name in ["get_all_conference_rooms", "get_all_departments"]:
+            # These methods only have max_results parameter
+            # Always normalize max_results to 100 for consistent caching
+            normalized_args = list(args)
+            if len(normalized_args) > 0:
+                normalized_args[0] = 100  # max_results
+            
+            # Add normalized positional arguments
+            for arg in normalized_args:
+                if isinstance(arg, (str, int, float, bool)):
+                    key_parts.append(str(arg))
+                elif isinstance(arg, datetime):
+                    key_parts.append(arg.isoformat())
+                else:
+                    key_parts.append(str(hash(str(arg))))
+        else:
+            # Add positional arguments normally for other methods
+            for arg in args:
+                if isinstance(arg, (str, int, float, bool)):
+                    key_parts.append(str(arg))
+                elif isinstance(arg, datetime):
+                    key_parts.append(arg.isoformat())
+                else:
+                    key_parts.append(str(hash(str(arg))))
         
         # Add keyword arguments in sorted order for consistency
         for k, v in sorted(kwargs.items()):
@@ -562,6 +603,61 @@ class GraphOperations:
     def get_current_datetime(self) -> str:
         return datetime.now().isoformat()
     
+    async def debug_graph_connection(self) -> dict:
+        """
+        Debug method to test Graph API connection and basic functionality.
+        Use this to troubleshoot when get_all_users returns empty results.
+        """
+        try:
+            print("🔍 Testing Graph API connection...")
+            
+            # Test 1: Check client initialization
+            client = self._get_client()
+            print("✅ Graph client initialized successfully")
+            
+            # Test 2: Make a simple API call to get user count
+            from msgraph.generated.users.users_request_builder import UsersRequestBuilder
+            query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
+            query_params.select = ["id", "displayName", "mail"]
+            query_params.top = 5  # Just get 5 users for testing
+            
+            request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params
+            )
+            
+            print("🌐 Making test Graph API call...")
+            response = await client.users.get(request_configuration=request_configuration)
+            
+            if hasattr(response, 'value') and response.value:
+                users = response.value
+                print(f"✅ Successfully retrieved {len(users)} users")
+                
+                for i, user in enumerate(users[:3]):  # Show first 3 users
+                    print(f"  👤 User {i+1}: {getattr(user, 'display_name', 'No name')} ({getattr(user, 'mail', 'No mail')})")
+                
+                return {
+                    'success': True,
+                    'user_count': len(users),
+                    'message': f'Successfully retrieved {len(users)} users'
+                }
+            else:
+                print("❌ Graph API response has no users")
+                return {
+                    'success': False,
+                    'user_count': 0,
+                    'message': 'Graph API response has no users'
+                }
+                
+        except Exception as e:
+            print(f"❌ Graph API test failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Graph API test failed: {e}'
+            }
+    
     def get_telemetry_status(self) -> Dict[str, Any]:
         """Get comprehensive telemetry status."""
         return {
@@ -583,8 +679,39 @@ class GraphOperations:
         Returns:
             bool: True if user appears to have mailbox properties, False otherwise
         """
-        # Only check if user has mail property (indicates Exchange mailbox assignment)
-        if not hasattr(user, 'mail') or not user.mail:
+        # Check if user has mail property (indicates Exchange mailbox assignment)
+        if not hasattr(user, 'mail'):
+            print(f"🔍 User {getattr(user, 'display_name', 'Unknown')} has no 'mail' attribute")
+            return False
+            
+        if not user.mail:
+            print(f"🔍 User {getattr(user, 'display_name', 'Unknown')} has empty mail property")
+            return False
+            
+        # Additional validation - ensure it's a valid email format
+        if '@' not in user.mail:
+            print(f"🔍 User {getattr(user, 'display_name', 'Unknown')} has invalid mail format: {user.mail}")
+            return False
+        
+        # Additional checks for conference rooms and service accounts that might have slipped through
+        display_name = getattr(user, 'display_name', '').lower()
+        mail_lower = user.mail.lower()
+        
+        # Check for conference room indicators
+        if ('conf_' in mail_lower or 
+            'room_' in mail_lower or 
+            'conference room' in display_name or
+            mail_lower.startswith('conf') or
+            mail_lower.startswith('room')):
+            print(f"🔍 User {getattr(user, 'display_name', 'Unknown')} appears to be a conference room")
+            return False
+            
+        # Check for service account indicators  
+        if ('service' in mail_lower or 
+            'service account' in display_name or
+            'system account' in display_name or
+            'microsoft service' in display_name):
+            print(f"🔍 User {getattr(user, 'display_name', 'Unknown')} appears to be a service account")
             return False
             
         return True
@@ -846,36 +973,68 @@ class GraphOperations:
     
     async def _get_all_users_impl(self, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
         try:
+            # Always use 100 as max_results for consistency - this ensures LLM behavior is predictable
+            actual_max_results = 100
+            print(f"🚀 Starting get_all_users with max_results={actual_max_results} (requested: {max_results}), exclude_inactive_mailboxes={exclude_inactive_mailboxes}")
+            
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
             
             # Select specific fields to reduce response size and ensure we get what we need
             query_params.select = self.user_response_fields
+            print(f"🔧 Selected fields: {self.user_response_fields}")
             
             # No API-level filtering - rely on validate_user_mailbox for verification
             
-            # Limit results for testing
-            query_params.top = max_results
+            # Use normalized max_results for consistent behavior
+            query_params.top = actual_max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
+            
+            print("🌐 Making Graph API call...")
             response = await self._get_client().users.get(request_configuration=request_configuration)
+            print(f"✅ Graph API call completed")
+
 
             if hasattr(response, 'value'):
                 users = response.value
+                print(f"🔍 Graph API returned {len(users) if users else 0} users")
                 
                 if exclude_inactive_mailboxes and users:
                     # Client-side filtering using mailbox property validation only
                     original_count = len(users)
-                    users = [user for user in users if self._has_valid_mailbox_properties(user)]
-                    filtered_count = original_count - len(users)
-                    print(f"📊 Retrieved {original_count} users, filtered out {filtered_count} without mail addresses, {len(users)} users remaining")
+                    
+                    # Filter out conference rooms (safely handle None mail)
+                    # Check both mail starting with 'conf' and display names containing 'Conference Room'
+                    users_after_conf = [user for user in users if user.mail and 
+                                       not user.mail.startswith('conf_') and 
+                                       not user.mail.startswith('room_') and
+                                       not (user.display_name and 'conference room' in user.display_name.lower())]
+                    print(f"🔧 After conference room filter: {len(users_after_conf)} users (removed {original_count - len(users_after_conf)})")
+                    
+                    # Filter out service accounts (safely handle None mail and check for service account indicators)
+                    users_after_service = [user for user in users_after_conf if 
+                                         user.mail and  # Must have an email
+                                         'service' not in user.mail.lower() and 
+                                         'service' not in (user.display_name or '').lower() and
+                                         not (user.display_name and 'service account' in user.display_name.lower())]
+                    print(f"🔧 After service account filter: {len(users_after_service)} users (removed {len(users_after_conf) - len(users_after_service)})")
+                    
+                    # Filter users with valid mailbox properties
+                    users_final = [user for user in users_after_service if self._has_valid_mailbox_properties(user)]
+                    print(f"🔧 After mailbox validation filter: {len(users_final)} users (removed {len(users_after_service) - len(users_final)})")
+                    
+                    filtered_count = original_count - len(users_final)
+                    print(f"📊 Retrieved {original_count} users, filtered out {filtered_count} users, {len(users_final)} users remaining")
+                    users = users_final
                 else:
                     print(f"📊 Retrieved {len(users)} users (no mailbox filtering applied)")
                 
                 return users
             else:
+                print("❌ Graph API response has no 'value' attribute")
                 return []
             
         except Exception as e:
@@ -904,6 +1063,10 @@ class GraphOperations:
     
     async def _get_all_conference_rooms_impl(self, max_results) -> List[User]:
         try:
+            # Always use 100 as max_results for consistency - this ensures LLM behavior is predictable
+            actual_max_results = 100
+            print(f"🚀 Starting get_all_conference_rooms with max_results={actual_max_results} (requested: {max_results})")
+            
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -914,8 +1077,8 @@ class GraphOperations:
             # Select specific fields to reduce response size and ensure we get what we need
             query_params.select = self.user_response_fields
             
-            # Limit results for testing
-            query_params.top = max_results
+            # Use normalized max_results for consistent behavior
+            query_params.top = actual_max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
@@ -1011,6 +1174,10 @@ class GraphOperations:
     
     async def _get_all_departments_impl(self, max_results) -> List[str]:
         try:
+            # Always use 100 as max_results for consistency - this ensures LLM behavior is predictable
+            actual_max_results = 100
+            print(f"🚀 Starting get_all_departments with max_results={actual_max_results} (requested: {max_results})")
+            
             departments = set()  # Use a set to avoid duplicates
 
             # Configure the request with proper query parameters
@@ -1019,8 +1186,8 @@ class GraphOperations:
                         
             # Select specific fields to reduce response size and ensure we get what we need
             query_params.select = self.user_response_fields
-            # Limit results for testing
-            query_params.top = max_results
+            # Use normalized max_results for consistent behavior
+            query_params.top = actual_max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
@@ -1068,6 +1235,10 @@ class GraphOperations:
         if not department:
             return []
         try:
+            # Always use 100 as max_results for consistency - this ensures LLM behavior is predictable  
+            actual_max_results = 100
+            print(f"🚀 Starting get_users_by_department with department='{department}', max_results={actual_max_results} (requested: {max_results}), exclude_inactive_mailboxes={exclude_inactive_mailboxes}")
+            
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -1078,8 +1249,8 @@ class GraphOperations:
             
             # Select specific fields to reduce response size and ensure we get what we need
             query_params.select = self.user_response_fields
-            # Limit results for testing
-            query_params.top = max_results
+            # Use normalized max_results for consistent behavior
+            query_params.top = actual_max_results
             
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
@@ -1132,6 +1303,10 @@ class GraphOperations:
     
     async def _search_users_impl(self, filter, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
         try:
+            # Always use 100 as max_results for consistency - this ensures LLM behavior is predictable
+            actual_max_results = 100
+            print(f"🚀 Starting search_users with filter='{filter}', max_results={actual_max_results} (requested: {max_results}), exclude_inactive_mailboxes={exclude_inactive_mailboxes}")
+            
             # Configure the request with proper query parameters
             from msgraph.generated.users.users_request_builder import UsersRequestBuilder
             query_params = UsersRequestBuilder.UsersRequestBuilderGetQueryParameters()
@@ -1139,12 +1314,12 @@ class GraphOperations:
             # Use only the provided filter - no additional accountEnabled filtering
             if filter:
                 query_params.filter = filter
-                # print(f"Applied filter: {query_params.filter}")
+                print(f"Applied filter: {query_params.filter}")
             
             # Select specific fields to reduce response size and ensure we get what we need
             query_params.select = self.user_response_fields
-            # Limit results for testing
-            query_params.top = max_results
+            # Use normalized max_results for consistent behavior
+            query_params.top = actual_max_results
             request_configuration = UsersRequestBuilder.UsersRequestBuilderGetRequestConfiguration(
                 query_parameters=query_params
             )
