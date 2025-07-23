@@ -1288,6 +1288,318 @@ credential = InteractiveBrowserCredential()
 
 **Data Privacy & Compliance:**
 - ✅ **Session Isolation**: Required session IDs prevent data leakage
+- ✅ **Audit Trails**: Comprehensive logging with OpenTelemetry
+- ✅ **Data Encryption**: HTTPS/TLS for all API communications
+- ✅ **Token Security**: Azure AD managed identity support
+
+## 📊 Telemetry & Analytics Queries
+
+The AI Calendar Assistant provides comprehensive telemetry through Azure Application Insights with OpenTelemetry integration. Use these Kusto queries in your Application Insights workspace to gain deep insights into system behavior, model usage, and performance.
+
+### 🔍 Query Categories
+
+| Category | Purpose | Key Insights |
+|----------|---------|--------------|
+| **🎯 Request Traceability** | End-to-end request tracking | Model usage, agent flows, API calls |
+| **🤖 Model Analytics** | AI model performance | Token usage, costs, response times |
+| **📊 Agent Correlation** | Multi-agent orchestration | Graph API usage, agent selection |
+| **⚠️ Error Analysis** | Troubleshooting & debugging | Failure patterns, root causes |
+| **⚡ Performance Monitoring** | System optimization | Response times, bottlenecks |
+| **👤 Session Tracking** | User journey analysis | Request flows, conversation patterns |
+| **📈 Real-time Monitoring** | Live system health | Active sessions, current load |
+
+### 🎯 Complete Request Traceability
+
+Track end-to-end request flows showing model usage, agent orchestration, and Graph API calls:
+
+```kql
+// Complete request traceability showing model usage, agents, and Graph API calls
+let timeRange = ago(24h);
+traces
+| where timestamp >= timeRange
+| where operation_Name in ("api.agent_chat", "api.multi_agent_chat", "agent.invoke", "multi_agent.process_message")
+    or operation_Name startswith "api."
+    or operation_Name contains "graph"
+    or operation_Name contains "azure_maps"
+| extend 
+    RequestId = tostring(operation_Id),
+    SessionId = tostring(customDimensions.["kwargs.session_id"]),
+    Model = tostring(customDimensions.["OPENAI_MODEL_DEPLOYMENT_NAME"]),
+    AgentType = case(
+        operation_Name contains "multi_agent", "Multi-Agent",
+        operation_Name contains "agent", "Single-Agent",
+        operation_Name startswith "api.", "API",
+        operation_Name contains "graph", "Graph-API",
+        operation_Name contains "azure_maps", "Azure-Maps",
+        "Other"
+    ),
+    FunctionName = tostring(customDimensions.["function.name"]),
+    ModuleName = tostring(customDimensions.["function.module"]),
+    ErrorType = tostring(customDimensions.["error.type"]),
+    ErrorMessage = tostring(customDimensions.["error.message"])
+| project 
+    timestamp,
+    RequestId,
+    SessionId,
+    operation_Name,
+    AgentType,
+    Model,
+    FunctionName,
+    ModuleName,
+    duration,
+    success,
+    ErrorType,
+    ErrorMessage,
+    severityLevel,
+    customDimensions
+| order by timestamp desc
+```
+
+### 🤖 Model Usage Analytics
+
+Analyze AI model performance, token consumption, and cost optimization:
+
+```kql
+// Track which models are being used and their performance
+let timeRange = ago(24h);
+traces
+| where timestamp >= timeRange
+| where operation_Name in ("api.agent_chat", "api.multi_agent_chat", "agent.invoke")
+    or customDimensions has "OPENAI_MODEL_DEPLOYMENT_NAME"
+    or message contains "completion"
+| extend 
+    Model = coalesce(
+        tostring(customDimensions.["OPENAI_MODEL_DEPLOYMENT_NAME"]),
+        tostring(customDimensions.["model"]),
+        extract(@"model['""]([^'""]+)", 1, message)
+    ),
+    RequestId = operation_Id,
+    TokensUsed = toint(customDimensions.["tokens.total"]),
+    Cost = todouble(customDimensions.["cost.total"])
+| where isnotempty(Model)
+| summarize 
+    RequestCount = count(),
+    AvgDuration = avg(duration),
+    MaxDuration = max(duration),
+    MinDuration = min(duration),
+    TotalTokens = sum(TokensUsed),
+    TotalCost = sum(Cost),
+    ErrorRate = countif(success == false) * 100.0 / count(),
+    UniqueUsers = dcount(tostring(customDimensions.["user_id"]))
+    by Model, bin(timestamp, 1h)
+| order by timestamp desc, RequestCount desc
+```
+
+### 📊 Agent & Graph API Correlation
+
+Understand which Graph APIs are called by specific agents and their performance:
+
+```kql
+// Show which Graph APIs are called by which agents
+let timeRange = ago(24h);
+traces
+| where timestamp >= timeRange
+| where operation_Name contains "graph" or operation_Name contains "agent"
+| extend 
+    RequestId = operation_Id,
+    SessionId = tostring(customDimensions.["kwargs.session_id"]),
+    AgentOperation = case(
+        operation_Name == "agent.invoke", "Agent-Invoke",
+        operation_Name == "multi_agent.process_message", "Multi-Agent-Process",
+        operation_Name startswith "api.agent", "Agent-API",
+        operation_Name startswith "api.multi_agent", "Multi-Agent-API",
+        "Other"
+    ),
+    GraphOperation = case(
+        operation_Name contains "get_user", "User-Lookup",
+        operation_Name contains "calendar", "Calendar-Access",
+        operation_Name contains "mailbox", "Mailbox-Access",
+        operation_Name contains "manager", "Manager-Lookup",
+        operation_Name contains "direct_reports", "Direct-Reports",
+        operation_Name contains "cache", "Cache-Operation",
+        operation_Name contains "validate", "Validation",
+        "Other-Graph"
+    ),
+    FunctionName = tostring(customDimensions.["function.name"]),
+    Args = tostring(customDimensions.["args.1"]) // First argument after self
+| project 
+    timestamp,
+    RequestId,
+    SessionId,
+    AgentOperation,
+    GraphOperation,
+    operation_Name,
+    FunctionName,
+    Args,
+    duration,
+    success
+| order by timestamp desc, RequestId
+```
+
+### ⚠️ Error Analysis & Troubleshooting
+
+Identify failures across the entire stack and their root causes:
+
+```kql
+// Identify failures and their root causes across the stack
+let timeRange = ago(24h);
+traces
+| where timestamp >= timeRange
+| where success == false or severityLevel >= 3 or isnotempty(customDimensions.["error.type"])
+| extend 
+    RequestId = operation_Id,
+    SessionId = tostring(customDimensions.["kwargs.session_id"]),
+    Component = case(
+        operation_Name contains "agent", "AI-Agent",
+        operation_Name contains "graph", "MS-Graph",
+        operation_Name contains "azure_maps", "Azure-Maps", 
+        operation_Name contains "cache", "Redis-Cache",
+        operation_Name startswith "api.", "API-Layer",
+        "Other"
+    ),
+    ErrorType = tostring(customDimensions.["error.type"]),
+    ErrorMessage = tostring(customDimensions.["error.message"]),
+    FunctionName = tostring(customDimensions.["function.name"]),
+    ModuleName = tostring(customDimensions.["function.module"])
+| project 
+    timestamp,
+    RequestId,
+    SessionId,
+    Component,
+    operation_Name,
+    FunctionName,
+    ModuleName,
+    ErrorType,
+    ErrorMessage,
+    message,
+    severityLevel
+| order by timestamp desc
+```
+
+### ⚡ Performance Analysis by Component
+
+Monitor response times and identify performance bottlenecks:
+
+```kql
+// Performance metrics across different components
+let timeRange = ago(24h);
+traces
+| where timestamp >= timeRange
+| extend 
+    Component = case(
+        operation_Name contains "agent", "AI-Agent",
+        operation_Name contains "graph", "MS-Graph",
+        operation_Name contains "azure_maps", "Azure-Maps",
+        operation_Name contains "cache", "Cache",
+        operation_Name startswith "api.", "API",
+        "Other"
+    ),
+    SubComponent = case(
+        operation_Name == "agent.invoke", "Agent-Invoke",
+        operation_Name == "multi_agent.process_message", "Multi-Agent",
+        operation_Name contains "get_user", "User-Operations",
+        operation_Name contains "calendar", "Calendar-Operations",
+        operation_Name contains "cache_get", "Cache-Read",
+        operation_Name contains "cache_set", "Cache-Write",
+        operation_Name
+    )
+| summarize 
+    RequestCount = count(),
+    AvgDuration = avg(duration),
+    P95Duration = percentile(duration, 95),
+    P99Duration = percentile(duration, 99),
+    ErrorRate = countif(success == false) * 100.0 / count(),
+    MaxDuration = max(duration)
+    by Component, SubComponent, bin(timestamp, 1h)
+| order by timestamp desc, AvgDuration desc
+```
+
+### 👤 Session-Based Request Flow
+
+Trace complete user sessions to understand conversation patterns:
+
+```kql
+// Trace complete user sessions showing the flow of operations
+let targetSession = "69149650-b87e-44cf-9413-db5c1a5b6d3f"; // Replace with target session
+let timeRange = ago(24h);
+traces
+| where timestamp >= timeRange
+| where tostring(customDimensions.["kwargs.session_id"]) == targetSession
+    or tostring(customDimensions.["session_id"]) == targetSession
+    or message contains targetSession
+| extend 
+    RequestId = operation_Id,
+    OperationType = case(
+        operation_Name contains "agent", "🤖 Agent",
+        operation_Name contains "graph", "📊 Graph",
+        operation_Name contains "azure_maps", "🗺️ Maps",
+        operation_Name contains "cache", "⚡ Cache",
+        operation_Name startswith "api.", "🌐 API",
+        "🔧 Other"
+    ),
+    FunctionName = tostring(customDimensions.["function.name"])
+| project 
+    timestamp,
+    RequestId,
+    OperationType,
+    operation_Name,
+    FunctionName,
+    duration,
+    success,
+    message
+| order by timestamp asc
+```
+
+### 📈 Real-time Monitoring Dashboard
+
+Monitor active sessions and current system health:
+
+```kql
+// Real-time monitoring for active sessions and performance
+let timeRange = ago(30m);
+traces
+| where timestamp >= timeRange
+| extend 
+    Component = case(
+        operation_Name contains "agent", "AI-Agent",
+        operation_Name contains "graph", "MS-Graph", 
+        operation_Name contains "azure_maps", "Azure-Maps",
+        operation_Name startswith "api.", "API",
+        "Other"
+    ),
+    Model = tostring(customDimensions.["OPENAI_MODEL_DEPLOYMENT_NAME"]),
+    SessionId = tostring(customDimensions.["kwargs.session_id"])
+| summarize 
+    ActiveRequests = count(),
+    ActiveSessions = dcount(SessionId),
+    AvgResponseTime = avg(duration),
+    ErrorCount = countif(success == false),
+    ModelsUsed = make_set(Model),
+    ComponentsActive = make_set(Component)
+    by bin(timestamp, 5m)
+| order by timestamp desc
+```
+
+### 🎯 Key Performance Indicators (KPIs)
+
+Create alerts and dashboards using these metrics:
+
+| Metric | Query Pattern | Threshold |
+|--------|--------------|-----------|
+| **Error Rate** | `countif(success == false) * 100.0 / count()` | > 5% |
+| **Response Time P95** | `percentile(duration, 95)` | > 5000ms |
+| **Model Token Usage** | `sum(toint(customDimensions.["tokens.total"]))` | Monitor trends |
+| **Active Sessions** | `dcount(tostring(customDimensions.["session_id"]))` | Capacity planning |
+| **API Availability** | `countif(operation_Name startswith "api." and success == true)` | > 99% |
+
+### 💡 Pro Tips for Analytics
+
+1. **Time Ranges**: Adjust `timeRange` variable based on your analysis needs
+2. **Session Tracking**: Use your actual session ID in session-based queries  
+3. **Custom Alerts**: Set up Application Insights alerts using these queries
+4. **Performance Baselines**: Establish baseline metrics for comparison
+5. **Cost Optimization**: Use model analytics to optimize token usage and costs
+
 ## 📁 Project Structure
 
 ```
