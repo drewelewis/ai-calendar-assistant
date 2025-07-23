@@ -1346,7 +1346,7 @@ traces
     Model,
     FunctionName,
     ModuleName,
-    duration,
+    durationMs,
     success,
     ErrorType,
     ErrorMessage,
@@ -1379,9 +1379,9 @@ traces
 | where isnotempty(Model)
 | summarize 
     RequestCount = count(),
-    AvgDuration = avg(duration),
-    MaxDuration = max(duration),
-    MinDuration = min(duration),
+    AvgDuration = avg(durationMs),
+    MaxDuration = max(durationMs),
+    MinDuration = min(durationMs),
     TotalTokens = sum(TokensUsed),
     TotalCost = sum(Cost),
     ErrorRate = countif(success == false) * 100.0 / count(),
@@ -1431,7 +1431,7 @@ traces
     operation_Name,
     FunctionName,
     Args,
-    duration,
+    durationMs,
     success
 | order by timestamp desc, RequestId
 ```
@@ -1505,11 +1505,11 @@ traces
     )
 | summarize 
     RequestCount = count(),
-    AvgDuration = avg(duration),
-    P95Duration = percentile(duration, 95),
-    P99Duration = percentile(duration, 99),
+    AvgDuration = avg(durationMs),
+    P95Duration = percentile(durationMs, 95),
+    P99Duration = percentile(durationMs, 99),
     ErrorRate = countif(success == false) * 100.0 / count(),
-    MaxDuration = max(duration)
+    MaxDuration = max(durationMs)
     by Component, SubComponent, bin(timestamp, 1h)
 | order by timestamp desc, AvgDuration desc
 ```
@@ -1544,7 +1544,7 @@ traces
     OperationType,
     operation_Name,
     FunctionName,
-    duration,
+    durationMs,
     success,
     message
 | order by timestamp asc
@@ -1572,7 +1572,7 @@ traces
 | summarize 
     ActiveRequests = count(),
     ActiveSessions = dcount(SessionId),
-    AvgResponseTime = avg(duration),
+    AvgResponseTime = avg(durationMs),
     ErrorCount = countif(success == false),
     ModelsUsed = make_set(Model),
     ComponentsActive = make_set(Component)
@@ -1587,7 +1587,7 @@ Create alerts and dashboards using these metrics:
 | Metric | Query Pattern | Threshold |
 |--------|--------------|-----------|
 | **Error Rate** | `countif(success == false) * 100.0 / count()` | > 5% |
-| **Response Time P95** | `percentile(duration, 95)` | > 5000ms |
+| **Response Time P95** | `percentile(durationMs, 95)` | > 5000ms |
 | **Model Token Usage** | `sum(toint(customDimensions.["tokens.total"]))` | Monitor trends |
 | **Active Sessions** | `dcount(tostring(customDimensions.["session_id"]))` | Capacity planning |
 | **API Availability** | `countif(operation_Name startswith "api." and success == true)` | > 99% |
