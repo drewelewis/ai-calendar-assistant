@@ -25,6 +25,8 @@ from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
 from msgraph.generated.models.location import Location
 from msgraph.generated.models.attendee import Attendee
 from msgraph.generated.models.email_address import EmailAddress
+from msgraph.generated.models.online_meeting import OnlineMeeting
+from msgraph.generated.models.chat_info import ChatInfo
 
 # Redis Cache Support - Using redis package with asyncio for Python 3.13 compatibility
 REDIS_AVAILABLE = False
@@ -1542,15 +1544,16 @@ class GraphOperations:
             return []
     
     # Create calendar event for a list of attendees and optional attendees
-    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, attendees: List[str] = None, optional_attendees: List[str] = None) -> Event:
+    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None) -> Event:
         try:
             
-            # Create the event object
+            # Create the event object with optional body content
             event = Event(
                 subject=subject,
                 start=DateTimeTimeZone(date_time=start, time_zone="UTC"),
                 end=DateTimeTimeZone(date_time=end, time_zone="UTC"),
                 location=Location(display_name=location) if location else None,
+                body=ItemBody(content_type="html", content=body) if body else None,
                 attendees=[]
             )
             
@@ -1558,13 +1561,17 @@ class GraphOperations:
             if attendees:
                 for attendee in attendees:
                     email_address = EmailAddress(address=attendee)
-                    event.attendees.append(Attendee(email_address=email_address, type="required"))
+                    attendee_obj = Attendee(email_address=email_address)
+                    attendee_obj.type = "required"
+                    event.attendees.append(attendee_obj)
             
             # Add optional attendees
             if optional_attendees:
                 for attendee in optional_attendees:
                     email_address = EmailAddress(address=attendee)
-                    event.attendees.append(Attendee(email_address=email_address, type="optional"))
+                    attendee_obj = Attendee(email_address=email_address)
+                    attendee_obj.type = "optional"
+                    event.attendees.append(attendee_obj)
             
             # Create the event in the user's calendar
             created_event = await self._get_client().users.by_user_id(user_id).calendar.events.post(event)
@@ -1572,6 +1579,147 @@ class GraphOperations:
             
         except Exception as e:
             print(f"An error occurred while creating calendar event: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return None
+
+    # Create Teams online meeting
+    async def create_online_meeting(self, user_id: str, subject: str, start: str, end: str) -> dict:
+        """
+        Create a Microsoft Teams online meeting.
+        
+        Args:
+            user_id (str): The ID of the user creating the meeting
+            subject (str): The subject/title of the meeting
+            start (str): Start date and time in ISO 8601 format
+            end (str): End date and time in ISO 8601 format
+            
+        Returns:
+            dict: Online meeting information including join URL and conference ID
+        """
+        try:
+            # Create online meeting using the Graph API
+            online_meeting = OnlineMeeting(
+                subject=subject,
+                start_date_time=start,
+                end_date_time=end
+            )
+            
+            # Create the online meeting
+            created_meeting = await self._get_client().users.by_user_id(user_id).online_meetings.post(online_meeting)
+            
+            # Extract relevant information
+            meeting_info = {
+                'id': created_meeting.id,
+                'join_url': created_meeting.join_web_url,
+                'conference_id': created_meeting.audio_conferencing.conference_id if created_meeting.audio_conferencing else None,
+                'dial_in_url': created_meeting.audio_conferencing.dial_in_url if created_meeting.audio_conferencing else None,
+                'subject': created_meeting.subject,
+                'chat_info': {
+                    'thread_id': created_meeting.chat_info.thread_id if created_meeting.chat_info else None,
+                    'message_id': created_meeting.chat_info.message_id if created_meeting.chat_info else None
+                } if created_meeting.chat_info else None
+            }
+            
+            return meeting_info
+            
+        except Exception as e:
+            print(f"An error occurred while creating online meeting: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            return None
+
+    # Enhanced create calendar event with Teams meeting option
+    async def create_calendar_event_with_teams(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_teams_meeting: bool = False) -> Event:
+        """
+        Create a calendar event with optional Microsoft Teams meeting integration.
+        
+        Args:
+            user_id (str): The ID of the user creating the event
+            subject (str): The subject/title of the event
+            start (str): Start date and time in ISO 8601 format
+            end (str): End date and time in ISO 8601 format
+            location (str, optional): Location of the event
+            body (str, optional): Body content of the event
+            attendees (List[str], optional): Required attendee email addresses
+            optional_attendees (List[str], optional): Optional attendee email addresses
+            create_teams_meeting (bool): Whether to create a Teams meeting link
+            
+        Returns:
+            Event: The created calendar event with Teams meeting info if requested
+        """
+        try:
+            teams_meeting_info = None
+            enhanced_body = body or ""
+            enhanced_location = location
+            
+            # Create Teams meeting if requested
+            if create_teams_meeting:
+                teams_meeting_info = await self.create_online_meeting(user_id, subject, start, end)
+                
+                if teams_meeting_info:
+                    # Update location to Teams
+                    enhanced_location = "Microsoft Teams Meeting"
+                    
+                    # Enhance body with Teams meeting information
+                    teams_info_html = f"""
+                    <div style="background-color: #f3f2f1; padding: 15px; margin: 10px 0; border-left: 4px solid #6264a7;">
+                        <h3 style="color: #6264a7; margin-top: 0;">📱 Microsoft Teams Meeting</h3>
+                        <p><strong>Join the meeting:</strong></p>
+                        <p><a href="{teams_meeting_info['join_url']}" style="color: #6264a7; text-decoration: none; font-weight: bold;">Click here to join the meeting</a></p>
+                        {f'<p><strong>Conference ID:</strong> {teams_meeting_info["conference_id"]}</p>' if teams_meeting_info.get("conference_id") else ''}
+                        {f'<p><a href="{teams_meeting_info["dial_in_url"]}">Find local dial-in numbers</a></p>' if teams_meeting_info.get("dial_in_url") else ''}
+                        <p><em>By joining this meeting, you agree to not record or share content without consent.</em></p>
+                    </div>
+                    """
+                    
+                    # Prepend Teams info to existing body content
+                    enhanced_body = teams_info_html + (f"<br/>{enhanced_body}" if enhanced_body else "")
+                else:
+                    print("⚠️ Failed to create Teams meeting, proceeding with regular calendar event")
+            
+            # Create the event object with enhanced content
+            event = Event(
+                subject=subject,
+                start=DateTimeTimeZone(date_time=start, time_zone="UTC"),
+                end=DateTimeTimeZone(date_time=end, time_zone="UTC"),
+                location=Location(display_name=enhanced_location) if enhanced_location else None,
+                body=ItemBody(content_type="html", content=enhanced_body) if enhanced_body else None,
+                attendees=[]
+            )
+            
+            # Add Teams meeting info to the event if available
+            if teams_meeting_info and create_teams_meeting:
+                # The online meeting information is automatically linked when using the same user context
+                pass
+            
+            # Add required attendees
+            if attendees:
+                for attendee in attendees:
+                    email_address = EmailAddress(address=attendee)
+                    attendee_obj = Attendee(email_address=email_address)
+                    attendee_obj.type = "required"
+                    event.attendees.append(attendee_obj)
+            
+            # Add optional attendees
+            if optional_attendees:
+                for attendee in optional_attendees:
+                    email_address = EmailAddress(address=attendee)
+                    attendee_obj = Attendee(email_address=email_address)
+                    attendee_obj.type = "optional"
+                    event.attendees.append(attendee_obj)
+            
+            # Create the event in the user's calendar
+            created_event = await self._get_client().users.by_user_id(user_id).calendar.events.post(event)
+            
+            # Store Teams meeting info for reference
+            if teams_meeting_info:
+                created_event._teams_meeting_info = teams_meeting_info
+            
+            return created_event
+            
+        except Exception as e:
+            print(f"An error occurred while creating calendar event with Teams meeting: {e}")
             print("Full traceback:")
             traceback.print_exc()
             return None
@@ -1613,6 +1761,8 @@ class GraphOperations:
                         print(f"Start: {event.start.date_time} {event.start.time_zone}")
                         print(f"End: {event.end.date_time} {event.end.time_zone}")
                         print(f"Location: {event.location.display_name if event.location else 'No location'}")
+                        if hasattr(event, 'body') and event.body and event.body.content:
+                            print(f"Description: {event.body.content}")
                         print("Attendees:")
                         for attendee in event.attendees:
                             print(f"  - {attendee.email_address.address} ({attendee.type})")
@@ -1630,6 +1780,7 @@ class GraphOperations:
                         event_data = {
                             "id": getattr(event, 'id', ''),
                             "subject": event.subject or '',
+                            "body": event.body.content if (hasattr(event, 'body') and event.body and event.body.content) else '',
                             "start": {
                                 "date_time": event.start.date_time,
                                 "time_zone": event.start.time_zone

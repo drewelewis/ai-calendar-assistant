@@ -38,7 +38,7 @@ except ImportError as e:
 
 graph_operations = GraphOperations(
     user_response_fields=["id", "givenname", "surname", "displayname", "userprincipalname", "mail", "jobtitle", "department", "manager"],
-    calendar_response_fields=["id", "subject", "start", "end", "location", "attendees"]
+    calendar_response_fields=["id", "subject", "start", "end", "location", "attendees", "body"]
 )
 max_results = 100
 
@@ -1000,6 +1000,7 @@ class GraphPlugin:
         - Location: Conference room, address, or "Microsoft Teams"
         - Required attendees: Email addresses of must-attend participants
         - Optional attendees: Email addresses of optional participants
+        - Body: Detailed description, agenda, or other event information (supports HTML formatting)
         
         TIME FORMAT EXAMPLES:
         - "2025-07-15T14:00:00Z" = July 15, 2025, 2:00 PM UTC
@@ -1010,12 +1011,17 @@ class GraphPlugin:
         - Optional attendees get "optional" invitation type
         - All attendees receive calendar invitations automatically
         
+        BODY CONTENT:
+        - Supports HTML formatting for rich text
+        - Can include agendas, meeting details, links, and instructions
+        - Will appear in calendar event details and email invitations
+        
         NOTE: Organizer must have calendar creation permissions
         """
     )
-    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
+    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
         self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end, 
-                              location=location, attendees=attendees, optional_attendees=optional_attendees)
+                              location=location, body=body, attendees=attendees, optional_attendees=optional_attendees)
         self._send_friendly_notification("✨ Creating new calendar event and sending invitations...")
         
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
@@ -1026,10 +1032,93 @@ class GraphPlugin:
         try:
             return await graph_operations.create_calendar_event(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
-                location, attendees, optional_attendees
+                location, body, attendees, optional_attendees
             )
         except Exception as e:
             print(f"Error in create_calendar_event: {e}")
+            return {}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Create a new calendar event/meeting with Microsoft Teams meeting link automatically generated.
+        
+        USE THIS WHEN:
+        - User specifically asks for a "Teams meeting", "virtual meeting", or "online meeting"
+        - User mentions "video call", "video conference", or "remote meeting"
+        - User wants to schedule a meeting with remote participants
+        - Need a meeting with dial-in options and screen sharing capabilities
+        
+        TEAMS MEETING CAPABILITIES:
+        - Automatically creates Teams meeting link and conference ID
+        - Generates dial-in numbers for phone participants
+        - Includes meeting chat thread for collaboration
+        - Supports screen sharing, recording, and breakout rooms
+        - Provides mobile app integration
+        
+        COMMON USE CASES:
+        - "Schedule a Teams meeting for the project review"
+        - "Create a video call with the remote team"
+        - "Set up an online meeting with external clients"
+        - "Book a virtual training session"
+        - "Schedule a hybrid meeting (in-person + remote)"
+        
+        AUTOMATIC FEATURES:
+        - Teams meeting link embedded in calendar invite
+        - Conference ID for dial-in access
+        - Meeting lobby and security controls
+        - Integration with Teams chat and collaboration tools
+        - Automatic meeting recording options (if enabled)
+        
+        ENHANCED BODY CONTENT:
+        - Professional Teams meeting invitation template
+        - Join link prominently displayed
+        - Dial-in information for phone users
+        - Meeting etiquette and guidelines
+        - Technical support information
+        
+        LOCATION HANDLING:
+        - Automatically sets location to "Microsoft Teams Meeting"
+        - Can be combined with physical location for hybrid meetings
+        - Override location if user specifies a different preference
+        
+        TIME FORMAT EXAMPLES:
+        - "2025-07-15T14:00:00Z" = July 15, 2025, 2:00 PM UTC
+        - "2025-07-20T09:30:00Z" = July 20, 2025, 9:30 AM UTC
+        
+        ATTENDEE MANAGEMENT:
+        - All attendees receive Teams meeting link in their invite
+        - Required attendees get "required" invitation type
+        - Optional attendees get "optional" invitation type
+        - External attendees can join via web browser (no Teams app required)
+        
+        SECURITY CONSIDERATIONS:
+        - Meeting lobby is enabled by default
+        - Organizer controls entry and permissions
+        - Recording and sharing policies apply
+        - Guest access follows organization policies
+        
+        NOTE: Organizer must have Teams and Exchange Online licenses
+        """
+    )
+    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
+        self._log_function_call("create_teams_meeting", user_id=user_id, subject=subject, start=start, end=end, 
+                              body=body, attendees=attendees, optional_attendees=optional_attendees, location=location)
+        self._send_friendly_notification("🎥 Creating Microsoft Teams meeting with video conference link...")
+        
+        if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
+        if not subject or not subject.strip(): raise ValueError("Error: subject parameter is empty")
+        if not start or not start.strip(): raise ValueError("Error: start parameter is empty")
+        if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
+        
+        try:
+            return await graph_operations.create_calendar_event_with_teams(
+                user_id.strip(), subject.strip(), start.strip(), end.strip(),
+                location, body, attendees, optional_attendees, create_teams_meeting=True
+            )
+        except Exception as e:
+            print(f"Error in create_teams_meeting: {e}")
             return {}
     ############################## KERNEL FUNCTION END #######################################
 

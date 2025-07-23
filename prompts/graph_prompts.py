@@ -115,12 +115,17 @@ class M365Prompts:
                 17. **Present Time Options**: If multiple slots are available, present them to the user for selection.
                 18. **Final Approval**: Ask user to approve complete meeting details including:
                     - Date, time, and timezone
-                    - Subject and agenda
+                    - Subject and agenda/description
                     - Duration
                     - Attendee list (with validated mailboxes)
                     - Location (room or external venue)
-                19. **Create Meeting**: Use `create_calendar_event` with all approved details including attendee email addresses.
-                20. **Confirm Creation**: Confirm meeting creation success and provide all meeting details to the user.
+                    - Meeting type (in-person vs virtual/Teams)
+                19. **Choose Meeting Type**: 
+                    - Use `create_teams_meeting` for: video calls, virtual meetings, remote collaboration, external attendees, demos
+                    - Use `create_calendar_event` for: in-person meetings, conference rooms, lunch meetings, site visits
+                    - Include Teams meeting when: user mentions "video", "virtual", "online", "Teams", "remote", or has external attendees
+                20. **Create Meeting**: Use appropriate function with all approved details including attendee email addresses and optional body content.
+                21. **Confirm Creation**: Confirm meeting creation success, provide meeting details and Teams join link if applicable.
                 21. **Critical Requirements**: 
                     - Always validate user mailboxes before attempting calendar operations
                     - Use current datetime from `get_current_datetime` for time calculations
