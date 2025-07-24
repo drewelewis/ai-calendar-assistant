@@ -243,3 +243,4 @@ def get_logger(name: str = None):
     if _telemetry_config:
         return _telemetry_config.get_logger(name)
     return logging.getLogger(name or "default")
+

@@ -381,3 +381,4 @@ class RiskPlugin:
             console_info("Risk plugin resources cleaned up", module="RiskPlugin")
         except Exception as e:
             console_warning(f"Error during risk plugin cleanup: {e}", module="RiskPlugin")
+

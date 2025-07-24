@@ -1683,3 +1683,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Unexpected error: {e}")
         print("Make sure you have proper Microsoft Graph authentication configured.")
+

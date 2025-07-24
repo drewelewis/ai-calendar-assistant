@@ -538,3 +538,4 @@ class RiskOperations:
                 console_info("Redis connection closed", "RiskOps")
             except Exception as e:
                 console_warning(f"Error closing Redis connection: {e}", "RiskOps")
+

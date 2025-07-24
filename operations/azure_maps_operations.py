@@ -834,3 +834,4 @@ class AzureMapsOperations:
             import traceback
             console_error(f"   • Traceback: {traceback.format_exc()}", "AzureMaps")
             return None
+

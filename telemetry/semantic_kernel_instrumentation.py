@@ -328,3 +328,4 @@ def is_semantic_kernel_instrumented() -> bool:
     """Check if Semantic Kernel is currently instrumented."""
     global _sk_instrumentation
     return _sk_instrumentation is not None and _sk_instrumentation.is_instrumented
+

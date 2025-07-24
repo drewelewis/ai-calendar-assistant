@@ -2872,3 +2872,5 @@ docker-compose up -d
 ```
 
 Built with ❤️ using Azure OpenAI, Microsoft Graph, and Semantic Kernel
+
+

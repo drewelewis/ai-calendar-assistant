@@ -205,3 +205,4 @@ class M365Prompts:
     # Add more methods or prompts as needed
 
 prompts= M365Prompts()
+

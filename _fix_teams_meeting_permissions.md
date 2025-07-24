@@ -86,3 +86,4 @@ Make sure these are set correctly:
 
 ## Security Note
 The global policy allows your app to create meetings for ALL users in your tenant. For production, consider applying only to specific users or groups who need this functionality.
+
