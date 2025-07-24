@@ -161,6 +161,17 @@ class TelemetryConfig:
                 description="Total number of OpenAI API calls",
                 unit="1"
             ),
+            # Retry and error tracking metrics
+            'openai_retries_total': meter.create_counter(
+                name="openai_retries_total",
+                description="Total number of OpenAI API retry attempts",
+                unit="1"
+            ),
+            'openai_invalid_content_errors_total': meter.create_counter(
+                name="openai_invalid_content_errors_total",
+                description="Total number of invalid content errors from OpenAI API",
+                unit="1"
+            ),
             # Token tracking metrics
             'openai_tokens_total': meter.create_counter(
                 name="openai_tokens_total",

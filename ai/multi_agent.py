@@ -148,6 +148,38 @@ class MultiAgentOrchestrator:
         
         self.settings = self.kernel.get_prompt_execution_settings_from_service_id(service_id=self.service_id)
         self.settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
+        
+        # Add parameters to help prevent "invalid content" errors
+        # Note: Newer API versions use max_completion_tokens instead of max_tokens
+        try:
+            max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "8000"))
+            if hasattr(self.settings, 'max_completion_tokens'):
+                self.settings.max_completion_tokens = max_tokens
+                self.logger.debug(f"Set max_completion_tokens to {max_tokens}")
+            elif hasattr(self.settings, 'max_tokens'):
+                # Fallback for older API versions that still use max_tokens
+                self.settings.max_tokens = max_tokens
+                self.logger.debug(f"Set max_tokens to {max_tokens} (fallback)")
+                
+            # Check if this is an o1 model to avoid setting unsupported parameters
+            is_o1_model = "o1" in self.deployment_name.lower() if self.deployment_name else False
+            
+            if not is_o1_model:
+                # These parameters are only supported by non-o1 models
+                temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+                if hasattr(self.settings, 'temperature'):
+                    self.settings.temperature = temperature
+                    self.logger.debug(f"Set temperature to {temperature}")
+                
+                top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
+                if hasattr(self.settings, 'top_p'):
+                    self.settings.top_p = top_p
+                    self.logger.debug(f"Set top_p to {top_p}")
+            else:
+                self.logger.info(f"Detected o1 model '{self.deployment_name}' - skipping temperature and top_p settings (not supported)")
+                
+        except (ValueError, TypeError) as e:
+            self.logger.warning(f"Error setting OpenAI parameters, using defaults: {e}")
     
     def _create_agents(self) -> Dict[str, ChatCompletionAgent]:
         """Create specialized agents for different tasks."""

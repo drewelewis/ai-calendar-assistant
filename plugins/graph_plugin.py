@@ -47,6 +47,28 @@ class GraphPlugin:
         self.debug = debug
         self.session_id = session_id
 
+    def _convert_to_dict(self, obj: Any) -> Any:
+        """Convert Microsoft Graph objects to JSON-serializable dictionaries."""
+        if obj is None:
+            return None
+        elif isinstance(obj, (str, int, float, bool)):
+            return obj
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, list):
+            return [self._convert_to_dict(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {k: self._convert_to_dict(v) for k, v in obj.items()}
+        elif hasattr(obj, '__dict__'):
+            # Handle Microsoft Graph objects (User, Event, etc.)
+            result = {}
+            for key, value in obj.__dict__.items():
+                if not key.startswith('_'):  # Skip private attributes
+                    result[key] = self._convert_to_dict(value)
+            return result
+        else:
+            return str(obj)
+
     # Helper method to log function calls if debug is enabled
     def _log_function_call(self, function_name, **kwargs):
         if self.debug:
@@ -96,7 +118,8 @@ class GraphPlugin:
         if not filter: raise ValueError("Error: filter parameter is empty")
         try:
             # Using a synchronous approach here
-            return await graph_operations.search_users(filter, max_results=max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            result = await graph_operations.search_users(filter, max_results=max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            return self._convert_to_dict(result) if result else []
         except Exception as e:
             print(f"Error in user_search: {e}")
             return []
@@ -134,7 +157,8 @@ class GraphPlugin:
         self._send_friendly_notification("⚙️ Getting user preferences and settings...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         try:
-            return await graph_operations.get_user_preferences_by_user_id(user_id.strip())
+            result = await graph_operations.get_user_preferences_by_user_id(user_id.strip())
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in get_user_preferences_by_user_id: {e}")
             return {}
@@ -175,7 +199,8 @@ class GraphPlugin:
         self._send_friendly_notification("📧 Checking user mailbox settings and configuration...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         try:
-            return await graph_operations.get_user_mailbox_settings_by_user_id(user_id.strip())
+            result = await graph_operations.get_user_mailbox_settings_by_user_id(user_id.strip())
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in get_user_mailbox_settings_by_user_id: {e}")
             return {}
@@ -249,7 +274,8 @@ class GraphPlugin:
         self._send_friendly_notification("🔍 Looking up user profile using their ID information...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         try:
-            return await graph_operations.get_user_by_user_id(user_id.strip())
+            result = await graph_operations.get_user_by_user_id(user_id.strip())
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in get_user_by_id: {e}")
             return {}
@@ -293,7 +319,14 @@ class GraphPlugin:
         self._send_friendly_notification("📧 Looking up user profile by email address...")
         if not email or not email.strip(): raise ValueError("Error: email parameter is empty")
         try:
-            return await graph_operations.get_user_by_email(email.strip())
+            # Use search_users with email filter to find the user
+            email_filter = f"mail eq '{email.strip()}' or userPrincipalName eq '{email.strip()}'"
+            users = await graph_operations.search_users(email_filter, max_results=1, exclude_inactive_mailboxes=False)
+            if users and len(users) > 0:
+                return self._convert_to_dict(users[0])  # Convert User object to dict
+            else:
+                print(f"No user found with email: {email}")
+                return {}
         except Exception as e:
             print(f"Error in get_user_by_email: {e}")
             return {}
@@ -337,7 +370,8 @@ class GraphPlugin:
         self._send_friendly_notification("👔 Finding manager information in org chart...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         try:
-            return await graph_operations.get_users_manager_by_user_id(user_id.strip())
+            result = await graph_operations.get_users_manager_by_user_id(user_id.strip())
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in get_user_manager: {e}")
             return {}
@@ -389,7 +423,8 @@ class GraphPlugin:
         if not user_id or not user_id.strip(): 
             raise ValueError("Error: user_id parameter is empty")
         try:
-            return await graph_operations.get_users_city_state_zipcode_by_user_id(user_id.strip())
+            result = await graph_operations.get_users_city_state_zipcode_by_user_id(user_id.strip())
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in get_user_location: {e}")
             return {}
@@ -428,12 +463,13 @@ class GraphPlugin:
         NOTE: Returns empty list if user has no direct reports or is not a manager
         """
     )
-    async def get_direct_reports(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose direct reports you want to retrieve"]) -> Annotated[List[dict], "Returns a list of users who report directly to the specified user."]:
+    async def get_users_direct_reports(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose direct reports you want to retrieve"]) -> Annotated[List[dict], "Returns a list of users who report directly to the specified user."]:
         self._log_function_call("get_direct_reports", user_id=user_id)
         self._send_friendly_notification("👥 Getting team members and direct reports...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         try:
-            return await graph_operations.get_direct_reports_by_user_id(user_id.strip())
+            result = await graph_operations.get_users_direct_reports_by_user_id(user_id.strip())
+            return self._convert_to_dict(result) if result else []
         except Exception as e:
             print(f"Error in get_direct_reports: {e}")
             return []
@@ -482,7 +518,8 @@ class GraphPlugin:
         if max_results <= 0: raise ValueError("Error: max_results must be greater than 0")
         if max_results > 1000: raise ValueError("Error: max_results cannot exceed 1000")
         try:
-            return await graph_operations.get_all_users(max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            result = await graph_operations.get_all_users(max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            return self._convert_to_dict(result) if result else []
         except Exception as e:
             print(f"Error in get_all_users: {e}")
             return []
@@ -543,7 +580,8 @@ class GraphPlugin:
         if max_results <= 0: raise ValueError("Error: max_results must be greater than 0")
         if max_results > 1000: raise ValueError("Error: max_results cannot exceed 1000")
         try:
-            return await graph_operations.get_users_by_department(department.strip(), max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            result = await graph_operations.get_users_by_department(department.strip(), max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            return self._convert_to_dict(result) if result else []
         except Exception as e:
             print(f"Error in get_users_by_department: {e}")
             return []
@@ -639,13 +677,14 @@ class GraphPlugin:
         NOTE: Use get_conference_room_events() to see room availability and bookings
         """
     )
-    async def get_all_conference_rooms(self, max_results: Annotated[int, "Maximum number of conference rooms to scan for (default: 100)"] = 100) -> Annotated[List[str], "Returns a list of all unique conference rooms in the Microsoft 365 Tenant Entra Directory."]:
+    async def get_all_conference_rooms(self, max_results: Annotated[int, "Maximum number of conference rooms to scan for (default: 100)"] = 100) -> Annotated[List[dict], "Returns a list of all unique conference rooms in the Microsoft 365 Tenant Entra Directory."]:
         self._log_function_call("get_all_conference_rooms", max_results=max_results)
         self._send_friendly_notification("🏢 Finding all available meeting rooms and conference spaces...")
         if max_results <= 0: raise ValueError("Error: max_results must be greater than 0")
         if max_results > 1000: raise ValueError("Error: max_results cannot exceed 1000")
         try:
-            return await graph_operations.get_all_conference_rooms(max_results)
+            result = await graph_operations.get_all_conference_rooms(max_results)
+            return self._convert_to_dict(result) if result else []
         except Exception as e:
             print(f"Error in get_all_conference_rooms: {e}")
             return []
@@ -753,7 +792,7 @@ class GraphPlugin:
         WHEN TO USE vs OTHER FUNCTIONS:
         - Use this for comprehensive room + calendar overview
         - Use get_all_conference_rooms() for just room list
-        - Use get_calendar_events() for specific user calendars
+        - Use get_user_calendar_events() for specific user calendars
         
         NOTE: This provides the most complete conference room usage picture with optional date filtering
         """
@@ -791,14 +830,15 @@ class GraphPlugin:
                 end_datetime = None
         
         try:
-            # Get all conference rooms
-            conference_rooms = await graph_operations.get_all_conference_rooms(max_results)
-            if not conference_rooms:
+            # Get all conference rooms (as User objects for the operations layer)
+            conference_rooms_raw = await graph_operations.get_all_conference_rooms(max_results)
+            if not conference_rooms_raw:
                 return []
             
             # Use the new method to get conference room events data with date filtering
-            conference_rooms_with_events = await graph_operations.get_conference_room_events(conference_rooms, start_datetime, end_datetime)
-            return conference_rooms_with_events
+            # The operations layer expects List[User] and returns List[dict]
+            conference_rooms_with_events = await graph_operations.get_conference_room_events(conference_rooms_raw, start_datetime, end_datetime)
+            return conference_rooms_with_events  # Already dicts from operations layer
         except Exception as e:
             print(f"Error in get_conference_room_events: {e}")
             return []
@@ -836,7 +876,7 @@ class GraphPlugin:
         - Insufficient permissions
         
         TROUBLESHOOTING WORKFLOW:
-        1. Use this when get_calendar_events() fails
+        1. Use this when get_user_calendar_events() fails
         2. Check the validation result and error message
         3. Follow the provided diagnostic suggestions
         4. Retry calendar operations after resolving issues
@@ -863,50 +903,24 @@ class GraphPlugin:
     ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
-        Get calendar events and meetings for a specific user with optional date filtering.
+        Get calendar events and meetings for a specific user.
         
-        USE THIS WHEN:
-        - User asks to "show calendar", "get meetings", or "check schedule"
-        - Need to see someone's appointments or availability
-        - User specifies date ranges for calendar viewing
-        - Planning meetings around existing schedules
+        USE THIS FOR:
+        - "show calendar", "get meetings", "check schedule", "show appointments"
+        - "What meetings does [user] have?"
+        - "Show [user]'s calendar for [date/period]"
+        - "Check [user]'s availability"
         
-        CAPABILITIES:
-        - Retrieves all calendar events for specified user
-        - Optional date range filtering (start/end dates)
-        - Comprehensive event details including attendees
-        - Enhanced error handling for mailbox issues
+        RETURNS: List of calendar events with meeting details, times, attendees, and locations.
         
-        COMMON USE CASES:
-        - "Show me John's calendar for this week"
-        - "What meetings does Sarah have tomorrow?"
-        - "Check my calendar for July 2025"
-        - "Are there any conflicts with Mike's schedule?"
-        - "Show upcoming meetings for next month"
-        
-        DATE FILTERING EXAMPLES:
-        - start_date: "2025-07-01T00:00:00Z" (July 1st, 2025)
-        - end_date: "2025-07-31T23:59:59Z" (End of July 2025)
-        - For today's events: use current date
-        - For this week: use Monday to Sunday range
-        
-        EVENT DETAILS PROVIDED:
-        - Meeting subject and description
-        - Start and end times with time zones
-        - Meeting location (physical or virtual)
-        - All attendees and their response status
-        - Meeting organizer information
-        
-        TROUBLESHOOTING:
-        - If this fails, use validate_user_mailbox() first
-        - Handles mailbox permission and access issues
-        - Provides specific error guidance for common problems
-        
-        NOTE: Requires user to have active Exchange Online mailbox
+        EXAMPLES:
+        - "Show John's calendar"
+        - "What meetings does Sarah have today?"
+        - "Check Mike's schedule for this week"
         """
     )
-    async def get_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[str, "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[str, "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
-        self._log_function_call("get_calendar_events", user_id=user_id, start_date=start_date, end_date=end_date)
+    async def get_user_calendar_events(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose calendar events you want to retrieve"], start_date: Annotated[str, "Optional start date for filtering events (ISO 8601 format, e.g., '2025-07-01T00:00:00Z')"] = None, end_date: Annotated[str, "Optional end date for filtering events (ISO 8601 format, e.g., '2025-07-31T23:59:59Z')"] = None) -> Annotated[List[dict], "Returns a list of calendar events for the specified user."]:
+        self._log_function_call("get_user_calendar_events", user_id=user_id, start_date=start_date, end_date=end_date)
         self._send_friendly_notification("📅 Retrieving calendar events and meetings...")
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         
@@ -937,7 +951,7 @@ class GraphPlugin:
                 end_datetime = None
         
         try:
-            result = await graph_operations.get_calendar_events_by_user_id(user_id.strip(), start_datetime, end_datetime)
+            result = await graph_operations.get_user_calendar_events_by_user_id(user_id.strip(), start_datetime, end_datetime)
             
             # Handle case where result is None (validation failed or error occurred)
             if result is None:
@@ -949,10 +963,10 @@ class GraphPlugin:
                 print("   • User has no Exchange Online license")
                 return []
                 
-            return result
+            return self._convert_to_dict(result) if result else []
         except Exception as e:
             error_message = str(e)
-            print(f"Error in get_calendar_events: {e}")
+            print(f"Error in get_user_calendar_events: {e}")
             
             # Provide user-friendly error context
             if "MailboxNotEnabledForRESTAPI" in error_message:
@@ -1030,10 +1044,11 @@ class GraphPlugin:
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
         
         try:
-            return await graph_operations.create_calendar_event(
+            result = await graph_operations.create_calendar_event(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
                 location, body, attendees, optional_attendees
             )
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in create_calendar_event: {e}")
             return {}
@@ -1113,13 +1128,134 @@ class GraphPlugin:
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
         
         try:
-            return await graph_operations.create_calendar_event_with_teams(
+            result = await graph_operations.create_calendar_event_with_teams(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
                 location, body, attendees, optional_attendees, create_teams_meeting=True
             )
+            return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in create_teams_meeting: {e}")
             return {}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Create a new calendar event/meeting with Zoom meeting link automatically generated.
+        
+        USE THIS WHEN:
+        - User asks for an "online meeting", "virtual meeting", or "video call"
+        - Need broader platform compatibility beyond Microsoft ecosystem
+        - External participants who may not have Teams access
+        - General video conferencing requirements
+        - User specifically requests "Zoom meeting"
+        
+        ZOOM MEETING CAPABILITIES:
+        - Automatically creates Zoom meeting link and meeting ID
+        - Generates meeting passcode for security
+        - Includes dial-in numbers for phone participants
+        - Professional Zoom invitation template
+        - Cross-platform compatibility (any device/browser)
+        - Works for external guests without special accounts
+        
+        COMMON USE CASES:
+        - "Schedule an online meeting for client demo"
+        - "Create a video call with external consultants"
+        - "Set up virtual meeting for vendor discussion"
+        - "Schedule Zoom meeting for training session"
+        
+        AUTOMATIC FEATURES:
+        - Meeting ID and passcode generation
+        - Zoom meeting link embedded in calendar invite
+        - Professional email template with join instructions
+        - Dial-in numbers for phone participants
+        - Automatically sets location to "Zoom Meeting"
+        - Enhanced body content with meeting details
+        
+        WHEN TO USE ZOOM VS TEAMS:
+        - Use Zoom for: External meetings, broad compatibility, general video calls
+        - Use Teams for: Internal collaboration, Microsoft ecosystem integration
+        
+        NOTE: Meeting created in organizer's calendar with Zoom integration
+        """
+    )
+    async def create_zoom_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Zoom meeting will be created"], subject: Annotated[str, "The subject/title of the Zoom meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Zoom meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Zoom meeting)"] = None) -> Annotated[dict, "Returns information about the created Zoom meeting and calendar event."]:
+        self._log_function_call("create_zoom_meeting", user_id=user_id, subject=subject, start=start, end=end, 
+                              body=body, attendees=attendees, optional_attendees=optional_attendees, location=location)
+        self._send_friendly_notification("🎥 Creating Zoom meeting with video conference link...")
+        
+        if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
+        if not subject or not subject.strip(): raise ValueError("Error: subject parameter is empty")
+        if not start or not start.strip(): raise ValueError("Error: start parameter is empty")
+        if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
+        
+        try:
+            result = await graph_operations.create_calendar_event_with_online_meeting(
+                user_id.strip(), subject.strip(), start.strip(), end.strip(),
+                location, body, attendees, optional_attendees, 
+                create_online_meeting=True, meeting_platform='zoom'
+            )
+            return self._convert_to_dict(result) if result else {}
+        except Exception as e:
+            print(f"Error in create_zoom_meeting: {e}")
+            return {}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Create a new calendar event/meeting with online meeting link (defaults to Teams, user can specify Zoom).
+        
+        USE THIS WHEN:
+        - User asks for an "online meeting" without specifying platform
+        - User wants to schedule a "virtual meeting" or "video call"
+        - Default to Teams unless user specifically requests Zoom
+        
+        PLATFORM OPTIONS:
+        - "teams": Default for M365 users, internal collaboration, Teams-specific features (real API)
+        - "zoom": Alternative for external meetings, broad compatibility, general video calls (mocked endpoint)
+        
+        EXAMPLES:
+        - "Schedule an online meeting" → Creates Teams meeting (default)
+        - "Set up a virtual call" → Creates Teams meeting (inform user they can choose Zoom)
+        - "Book a video conference" → Creates Teams meeting (offer Zoom as alternative)
+        - "Create a Zoom meeting" → Creates Zoom meeting (specific request)
+        
+        BEHAVIOR: 
+        - Defaults to Teams if no platform specified
+        - Zoom uses mocked endpoint (ready for API integration)
+        - Teams uses real Microsoft Graph API for M365 users
+        - Inform users they can request Zoom as an alternative
+        """,
+        name="create_online_meeting"
+    )
+    async def create_online_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the online meeting will be created"], subject: Annotated[str, "The subject/title of the online meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], platform: Annotated[str, "Meeting platform - defaults to 'teams', can specify 'zoom' for alternative platform"] = "teams", body: Annotated[str, "Optional detailed description/agenda for the meeting"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info"] = None) -> Annotated[dict, "Returns information about the created online meeting and calendar event."]:
+        self._log_function_call("create_online_meeting", user_id=user_id, subject=subject, start=start, end=end, 
+                               platform=platform, body=body, attendees=attendees, optional_attendees=optional_attendees, location=location)
+        
+        # Default to Teams if no platform specified
+        if platform is None:
+            platform = 'teams'
+        
+        platform_display = "Teams" if platform.lower() == "teams" else "Zoom"
+        
+        if platform.lower() == "teams":
+            self._send_friendly_notification(f"📱 Creating Teams online meeting (default platform)...")
+        else:
+            self._send_friendly_notification(f"🎥 Creating Zoom online meeting (user requested alternative)...")
+        
+       
+        
+        try:
+            result = await graph_operations.create_calendar_event_with_online_meeting(
+                user_id, subject, start, end, location, body, 
+                attendees, optional_attendees, 
+                create_online_meeting=True, meeting_platform=platform
+            )
+            return self._convert_to_dict(result) if result else {}
+        except Exception as e:
+            print(f"Error in create_online_meeting: {e}")
+            return {"error": str(e), "status": "failed"}
     ############################## KERNEL FUNCTION END #######################################
 
     ############################## KERNEL FUNCTION START #####################################
@@ -1136,7 +1272,7 @@ class GraphPlugin:
         CRITICAL WORKFLOW REQUIREMENT:
         - ALL calendar and date-related kernel functions should call this function FIRST
         - This ensures consistent time reference across all operations
-        - Required before: create_calendar_event, get_calendar_events, get_conference_room_events
+        - Required before: create_calendar_event, get_user_calendar_events, get_conference_room_events
         - Use the returned timestamp for validation, comparison, and reference
         
         RETURNS:
@@ -1165,7 +1301,7 @@ class GraphPlugin:
         DEPENDENCY PATTERN:
         - Other kernel functions should call this first to establish time context
         - Example: get_current_datetime() → create_calendar_event()
-        - Example: get_current_datetime() → get_calendar_events() with relative dates
+        - Example: get_current_datetime() → get_user_calendar_events() with relative dates
         - Example: get_current_datetime() → get_conference_room_events() with date range
 
         

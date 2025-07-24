@@ -151,7 +151,10 @@ class SemanticKernelInstrumentation:
                 # Extract settings information
                 if kwargs.get('settings'):
                     settings = kwargs['settings']
-                    if hasattr(settings, 'max_tokens'):
+                    # Handle both max_tokens (older API) and max_completion_tokens (newer API)
+                    if hasattr(settings, 'max_completion_tokens'):
+                        span.set_attribute("openai.request.max_completion_tokens", settings.max_completion_tokens)
+                    elif hasattr(settings, 'max_tokens'):
                         span.set_attribute("openai.request.max_tokens", settings.max_tokens)
                     if hasattr(settings, 'temperature'):
                         span.set_attribute("openai.request.temperature", settings.temperature)

@@ -545,6 +545,16 @@ AZURE_MAPS_ACCOUNT_NAME=your-maps-account-name
 - **Service Unavailability:** Fallback responses and user guidance
 - **Partial Results:** Handle incomplete data gracefully
 
+**Azure OpenAI Resilience:**
+- **"Invalid Content" Errors:** Automatic retry with response validation for malformed model outputs
+- **Exponential Backoff:** Smart retry timing with jitter (0.5-50% randomization) to prevent thundering herd
+- **Response Validation:** Content checking to detect null bytes, encoding issues, and overly long responses
+- **Model Parameter Tuning:** Configurable temperature, max_tokens, and top_p optimized for o1 models
+- **Comprehensive Metrics:** Detailed telemetry tracking retry attempts, success rates, and error patterns
+- **Retryable Error Detection:** Automatic handling of 500, 429, 502-504 errors, timeouts, and rate limits
+- **Configurable Timeouts:** Extended delays for o1 models that require longer reasoning time
+- **Response Length Validation:** Prevents processing of malformed responses exceeding size limits
+
 **Fallback Strategies:**
 - **Cache First:** Return cached results when service unavailable
 - **Simplified Responses:** Basic location info when detailed data fails
@@ -861,6 +871,24 @@ AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_API_VERSION=2024-10-21
 AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
 
+# Azure OpenAI Model Parameters (Optional)
+# Maximum tokens in response - o1 models can handle much larger responses
+OPENAI_MAX_TOKENS=8000
+# Temperature for randomness - o1 models work best with lower temperature
+OPENAI_TEMPERATURE=0.3
+# Top-p for nucleus sampling - slightly lower for more focused responses
+OPENAI_TOP_P=0.8
+
+# Azure OpenAI Retry Configuration (Optional)
+# Maximum number of retry attempts for failed API calls
+OPENAI_MAX_RETRIES=3
+# Base delay in seconds for exponential backoff - o1 models may need longer processing time
+OPENAI_BASE_DELAY=2.0
+# Maximum delay in seconds between retries - longer for o1 reasoning time
+OPENAI_MAX_DELAY=120.0
+# Maximum allowed response length to prevent malformed responses
+MAX_RESPONSE_LENGTH=100000
+
 # Microsoft Graph API Authentication
 AZURE_CLIENT_ID=your-client-id
 AZURE_CLIENT_SECRET=your-client-secret
@@ -897,6 +925,85 @@ TELEMETRY_SAMPLE_RATE=1.0
 DEBUG_MODE=true
 LOG_LEVEL=INFO
 ```
+
+### 🔄 Azure OpenAI Error Handling & Retry Logic
+
+The AI Calendar Assistant includes comprehensive error handling specifically designed to address common Azure OpenAI issues, particularly the "invalid content" errors that can occur with language models.
+
+#### **Automatic Retry Mechanism**
+
+**Retryable Errors Handled:**
+- **500 Internal Server Error** - "The model produced invalid content"
+- **429 Rate Limiting** - Too many requests
+- **502/503/504 Server Errors** - Azure service issues
+- **Timeout Errors** - Network connectivity issues
+
+**Exponential Backoff Algorithm:**
+```
+delay = min(base_delay * (2 ^ attempt), max_delay)
+with 0-50% jitter to prevent thundering herd
+```
+
+**Example Retry Sequence (default settings):**
+- Attempt 1: 2.0 seconds (±50% jitter)
+- Attempt 2: 4.0 seconds (±50% jitter) 
+- Attempt 3: 8.0 seconds (±50% jitter)
+- After 3 retries: Permanent failure
+
+#### **Response Content Validation**
+
+**Automatic Detection of:**
+- Null bytes (`\x00`) in responses
+- Unicode replacement characters (`\uFFFD`)
+- Responses exceeding maximum length limits
+- Malformed JSON when structured output expected
+
+#### **o1 Model Optimizations**
+
+**Enhanced Configuration for o1 Models:**
+- **Extended Token Limits:** 8,000 tokens (vs 4,000 for GPT-4)
+- **Lower Temperature:** 0.3 (vs 0.7) for more consistent reasoning
+- **Longer Retry Delays:** 2.0 base delay to account for reasoning time
+- **Extended Timeouts:** 120 second maximum for complex queries
+
+#### **Monitoring & Telemetry**
+
+**Custom Metrics Available in Azure Monitor:**
+```kql
+// Retry success rate analysis
+customMetrics
+| where name == "openai_retries_total"
+| extend status = tostring(customDimensions.status)
+| summarize count() by status, bin(timestamp, 1h)
+
+// Invalid content error tracking
+customMetrics  
+| where name == "openai_invalid_content_errors_total"
+| extend model = tostring(customDimensions.model)
+| summarize ErrorCount = sum(value) by model, bin(timestamp, 1h)
+```
+
+**Health Check Methods:**
+```python
+# Get current retry configuration
+config = agent.get_retry_configuration()
+
+# Check system health status  
+status = agent.get_health_status()
+```
+
+#### **Testing & Validation**
+
+**Test Script Available:**
+```bash
+python test_retry_logic.py
+```
+
+This script validates:
+- Normal operation with retry logic
+- Configuration loading
+- Problematic prompt handling
+- Telemetry metric collection
 
 ### Azure Services Setup
 

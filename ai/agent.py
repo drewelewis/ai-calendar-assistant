@@ -7,6 +7,8 @@ import logging
 from typing import Annotated
 import datetime
 import colorama
+import time
+import random
 from dotenv import load_dotenv
 
 from semantic_kernel import Kernel
@@ -71,6 +73,25 @@ class Agent:
         self.cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
         self.cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
         self.cosmos_container = os.getenv("COSMOS_CONTAINER", "ChatHistory")
+        
+        # Azure OpenAI retry configuration
+        # Detect if using o1 model for optimized defaults
+        is_o1_model = "o1" in os.getenv("OPENAI_MODEL_DEPLOYMENT_NAME", "").lower()
+        
+        # Set retry defaults based on model type
+        if is_o1_model:
+            # o1 models need more time for reasoning, so use longer delays
+            default_base_delay = "2.0"
+            default_max_delay = "120.0"
+            self.logger.info("Detected o1 model - using extended retry delays for reasoning time")
+        else:
+            default_base_delay = "1.0"
+            default_max_delay = "60.0"
+        
+        self.max_retries = int(os.getenv("OPENAI_MAX_RETRIES", "3"))
+        self.base_delay = float(os.getenv("OPENAI_BASE_DELAY", default_base_delay))
+        self.max_delay = float(os.getenv("OPENAI_MAX_DELAY", default_max_delay))
+        self.jitter = True  # Add randomization to prevent thundering herd
         
         # Log initialization
         self.logger.info(f"Initializing Agent with session_id: {session_id}")
@@ -164,8 +185,47 @@ class Agent:
             
             self.logger.info(f"✅ Azure OpenAI service configured with deployment: {self.deployment_name}")
         
+        # Configure execution settings with error prevention parameters
         self.settings = self.kernel.get_prompt_execution_settings_from_service_id(service_id=self.service_id)
         self.settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
+        
+        # Add parameters to help prevent "invalid content" errors
+        # These can be overridden by environment variables
+        # Note: o1 models have different parameter support than GPT-4 models
+        try:
+            # Set max_completion_tokens to prevent excessively long responses that might be malformed
+            # o1 models support higher token limits and longer reasoning chains
+            # Note: Newer API versions use max_completion_tokens instead of max_tokens
+            max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "8000"))  # Higher default for o1
+            if hasattr(self.settings, 'max_completion_tokens'):
+                self.settings.max_completion_tokens = max_tokens
+                self.logger.debug(f"Set max_completion_tokens to {max_tokens}")
+            elif hasattr(self.settings, 'max_tokens'):
+                # Fallback for older API versions that still use max_tokens
+                self.settings.max_tokens = max_tokens
+                self.logger.debug(f"Set max_tokens to {max_tokens} (fallback)")
+            
+            # Check if this is an o1 model to avoid setting unsupported parameters
+            is_o1_model = "o1" in self.deployment_name.lower() if self.deployment_name else False
+            
+            if not is_o1_model:
+                # These parameters are only supported by non-o1 models
+                # Set temperature for more deterministic responses (helps prevent hallucinations)
+                temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+                if hasattr(self.settings, 'temperature'):
+                    self.settings.temperature = temperature
+                    self.logger.debug(f"Set temperature to {temperature}")
+                
+                # Set top_p for nucleus sampling (another parameter to control randomness)
+                top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
+                if hasattr(self.settings, 'top_p'):
+                    self.settings.top_p = top_p
+                    self.logger.debug(f"Set top_p to {top_p}")
+            else:
+                self.logger.info(f"Detected o1 model '{self.deployment_name}' - skipping temperature and top_p settings (not supported)")
+                
+        except (ValueError, TypeError) as e:
+            self.logger.warning(f"Error setting OpenAI parameters, using defaults: {e}")
 
         # Create agent with properly structured instructions
         combined_instructions = prompts.build_complete_instructions(self.session_id)
@@ -177,7 +237,172 @@ class Agent:
             arguments=KernelArguments(settings=self.settings),
         )
         
+        # Log o1-specific initialization details
+        if is_o1_model:
+            self.logger.info("🧠 o1 Model Configuration Applied:")
+            self.logger.info(f"   - Extended max_tokens: {max_tokens}")
+            self.logger.info(f"   - Extended retry delays: base={self.base_delay}s, max={self.max_delay}s")
+            self.logger.info(f"   - Extended response length limit: {os.getenv('MAX_RESPONSE_LENGTH', '100000')}")
+            self.logger.info("   - Temperature and top_p parameters disabled (not supported by o1)")
+        
         self.logger.info("✅ AI Calendar Assistant Agent initialized successfully")
+
+    async def _retry_with_exponential_backoff(self, func, *args, **kwargs):
+        """
+        Retry function with exponential backoff for handling transient Azure OpenAI errors.
+        
+        Args:
+            func: The async function to retry
+            *args, **kwargs: Arguments to pass to the function
+            
+        Returns:
+            The result of the successful function call
+            
+        Raises:
+            The last exception if all retries are exhausted
+        """
+        last_exception = None
+        
+        for attempt in range(self.max_retries + 1):  # +1 because we want max_retries actual retries after first attempt
+            try:
+                # Try the function call
+                result = await func(*args, **kwargs)
+                
+                # If we get here, the call was successful
+                if attempt > 0:
+                    self.logger.info(f"Azure OpenAI call succeeded on attempt {attempt + 1}")
+                    
+                    # Record successful retry - wrap in try-catch
+                    try:
+                        if 'openai_retries_total' in self.metrics:
+                            self.metrics['openai_retries_total'].add(1, {
+                                "model": self.deployment_name,
+                                "attempt": str(attempt + 1),
+                                "status": "success"
+                            })
+                    except Exception as e:
+                        self.logger.warning(f"Failed to record retry success metric: {e}")
+                
+                return result
+                
+            except Exception as e:
+                last_exception = e
+                error_str = str(e).lower()
+                
+                # Check if this is a retryable error
+                # o1 models may have longer processing times, so include timeout-related errors
+                is_retryable = (
+                    "500" in error_str or 
+                    "internal server error" in error_str or
+                    "internalservererror" in error_str or
+                    "invalid content" in error_str or
+                    "timeout" in error_str or
+                    "rate limit" in error_str or
+                    "429" in error_str or
+                    "502" in error_str or
+                    "503" in error_str or
+                    "504" in error_str or
+                    "gateway timeout" in error_str or  # Common with o1 due to processing time
+                    "processing timeout" in error_str  # o1-specific processing timeouts
+                )
+                
+                if not is_retryable or attempt >= self.max_retries:
+                    # Either not retryable or we've exhausted retries
+                    self.logger.error(f"Azure OpenAI call failed permanently after {attempt + 1} attempts: {e}")
+                    
+                    # Record failed retry - wrap in try-catch
+                    try:
+                        if 'openai_retries_total' in self.metrics:
+                            self.metrics['openai_retries_total'].add(1, {
+                                "model": self.deployment_name,
+                                "attempt": str(attempt + 1),
+                                "status": "failed",
+                                "error_type": type(e).__name__
+                            })
+                    except Exception as metric_e:
+                        self.logger.warning(f"Failed to record retry failure metric: {metric_e}")
+                    
+                    raise e
+                
+                # Calculate delay with exponential backoff and jitter
+                delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+                if self.jitter:
+                    delay *= (0.5 + random.random() * 0.5)  # Add 0-50% jitter
+                
+                self.logger.warning(
+                    f"Azure OpenAI call failed on attempt {attempt + 1}/{self.max_retries + 1}: {e}. "
+                    f"Retrying in {delay:.2f} seconds..."
+                )
+                
+                # Record retry attempt - wrap in try-catch
+                try:
+                    if 'openai_retries_total' in self.metrics:
+                        self.metrics['openai_retries_total'].add(1, {
+                            "model": self.deployment_name,
+                            "attempt": str(attempt + 1),
+                            "status": "retry",
+                            "error_type": type(e).__name__
+                        })
+                except Exception as metric_e:
+                    self.logger.warning(f"Failed to record retry attempt metric: {metric_e}")
+                
+                await asyncio.sleep(delay)
+        
+        # This should never be reached due to the logic above, but just in case
+        raise last_exception
+
+    def _validate_response_content(self, response_content: str) -> bool:
+        """
+        Validate that the response content is well-formed and doesn't contain invalid characters.
+        
+        Args:
+            response_content: The content to validate
+            
+        Returns:
+            True if content is valid, False otherwise
+        """
+        try:
+            # Check for basic validity
+            if not response_content or not isinstance(response_content, str):
+                self.logger.warning("Response content is empty or not a string")
+                return False
+            
+            # Check for extremely long responses that might be malformed
+            # o1 models can produce longer, more detailed responses, so use higher default
+            is_o1_model = "o1" in self.deployment_name.lower() if self.deployment_name else False
+            default_max_length = "100000" if is_o1_model else "50000"
+            max_response_length = int(os.getenv("MAX_RESPONSE_LENGTH", default_max_length))
+            
+            if len(response_content) > max_response_length:
+                self.logger.warning(f"Response content exceeds maximum length: {len(response_content)} > {max_response_length}")
+                return False
+            
+            # Check for common invalid content patterns
+            invalid_patterns = [
+                "\x00",  # Null bytes
+                "\uFFFD",  # Unicode replacement character (often indicates encoding issues)
+            ]
+            
+            for pattern in invalid_patterns:
+                if pattern in response_content:
+                    self.logger.warning(f"Response contains invalid pattern: {pattern}")
+                    return False
+            
+            # If content starts with { or [, try to validate as JSON
+            stripped_content = response_content.strip()
+            if stripped_content.startswith(("{", "[")):
+                try:
+                    json.loads(stripped_content)
+                    self.logger.debug("Response content validated as valid JSON")
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Response appears to be JSON but is invalid: {e}")
+                    # Don't return False here - might be partial JSON or JSON-like text
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error validating response content: {e}")
+            return False
 
 
     @trace_async_method(operation_name="agent.invoke", include_args=True)
@@ -308,10 +533,48 @@ class Agent:
                 except Exception as e:
                     self.logger.warning(f"Failed to record console telemetry for OpenAI call: {e}")
                 
-                response = await self.agent.get_response(
-                    messages=message,
-                    thread=thread
-                )
+                # Create a wrapper function for the OpenAI call that includes validation
+                async def make_openai_call():
+                    try:
+                        # Make the actual OpenAI API call
+                        response = await self.agent.get_response(
+                            messages=message,
+                            thread=thread
+                        )
+                        
+                        # Validate the response content
+                        if response and response.message and response.message.content:
+                            if not self._validate_response_content(response.message.content):
+                                raise ValueError("Invalid response content detected from Azure OpenAI")
+                        
+                        return response
+                        
+                    except Exception as e:
+                        # Log the error with additional context
+                        self.logger.error(f"OpenAI API call failed: {e}")
+                        
+                        # Check if this is the "invalid content" error specifically
+                        if "invalid content" in str(e).lower():
+                            self.logger.warning(
+                                "Azure OpenAI returned 'invalid content' error. "
+                                "This may be due to the model generating malformed output. "
+                                "Consider adjusting the prompt or model parameters."
+                            )
+                            
+                            # Record specific invalid content error - wrap in try-catch
+                            try:
+                                if 'openai_invalid_content_errors_total' in self.metrics:
+                                    self.metrics['openai_invalid_content_errors_total'].add(1, {
+                                        "model": self.deployment_name,
+                                        "session_id": self.session_id
+                                    })
+                            except Exception as metric_e:
+                                self.logger.warning(f"Failed to record invalid content error metric: {metric_e}")
+                        
+                        raise e
+                
+                # Use retry logic for the OpenAI call
+                response = await self._retry_with_exponential_backoff(make_openai_call)
                 thread = response.thread
                 
                 # Extract token usage from response if available - wrap in try-catch
@@ -360,5 +623,44 @@ class Agent:
 
         return response.message.content
 
-
+    def get_retry_configuration(self) -> dict:
+        """
+        Get the current retry configuration for monitoring and debugging.
+        
+        Returns:
+            dict: Current retry configuration settings
+        """
+        is_o1_model = "o1" in self.deployment_name.lower() if self.deployment_name else False
+        
+        return {
+            "max_retries": self.max_retries,
+            "base_delay": self.base_delay,
+            "max_delay": self.max_delay,
+            "jitter_enabled": self.jitter,
+            "has_telemetry": self.telemetry is not None,
+            "has_cosmosdb": self.cosmos_manager is not None,
+            "session_id": self.session_id,
+            "deployment_name": self.deployment_name,
+            "is_o1_model": is_o1_model,
+            "o1_optimizations_applied": is_o1_model,
+            "max_response_length": int(os.getenv("MAX_RESPONSE_LENGTH", "100000" if is_o1_model else "50000"))
+        }
+    
+    def get_health_status(self) -> dict:
+        """
+        Get the current health status of the agent and its dependencies.
+        
+        Returns:
+            dict: Health status information
+        """
+        status = {
+            "agent_initialized": True,
+            "openai_configured": bool(self.endpoint and self.api_key and self.deployment_name),
+            "telemetry_configured": self.telemetry is not None,
+            "cosmosdb_configured": self.cosmos_manager is not None,
+            "session_id": self.session_id,
+            "retry_config": self.get_retry_configuration()
+        }
+        
+        return status
 
