@@ -21,7 +21,7 @@ echo.
 
 echo 🏷️  Step 3: Tagging for Docker Hub...
 set IMAGE_NAME=ai-calendar-assistant
-set DOCKERHUB_USER=drewl
+set DOCKERHUB_USER=sxavramidis
 
 docker tag %IMAGE_NAME%:latest %DOCKERHUB_USER%/%IMAGE_NAME%:latest
 docker tag %IMAGE_NAME%:%VERSION% %DOCKERHUB_USER%/%IMAGE_NAME%:%VERSION%

@@ -161,8 +161,8 @@ exclude_lines = [
 
 # Project-specific metadata (custom section)
 [tool.ai-calendar-assistant]
-version = "1.47.0"
-release_date = "2025-07-24"
+version = "1.53.0"
+release_date = "2025-07-25"
 
 [tool.ai-calendar-assistant.features]
 single_agent = true

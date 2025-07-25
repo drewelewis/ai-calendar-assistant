@@ -2420,6 +2420,121 @@ class GraphOperations:
             traceback.print_exc()
             return None
     
+    def _generate_teams_meeting_section(self, meeting_info: dict) -> str:
+            """
+            Generate a Teams meeting section in the standard format for email bodies.
+            
+            Args:
+                meeting_info (dict): Meeting information from create_teams_meeting
+                
+            Returns:
+                str: HTML formatted Teams meeting section
+            """
+            join_url = meeting_info.get('join_url', '')
+            conference_id = meeting_info.get('conference_id', '')
+            dial_in_url = meeting_info.get('dial_in_url', '')
+            
+            # Debug logging to check what we received
+            print(f"🔍 Teams meeting section: Join URL={join_url}, Conference ID={conference_id}")
+            
+            # If no join_url, this is a problem - use a fallback or show error
+            if not join_url:
+                print("⚠️ WARNING: No join URL provided for Teams meeting section!")
+                join_url = "https://teams.microsoft.com/l/meetup-join/[MISSING-JOIN-URL]"
+            
+            # Generate the Teams meeting section in the requested format
+            teams_section = f"""
+    <div style="margin-top: 30px; padding: 20px; border-top: 2px solid #6264a7; background-color: #f8f9fa;">
+        <table cellpadding="0" cellspacing="0" style="width: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+            <tr>
+                <td>
+                    <h3 style="color: #6264a7; margin: 0 0 15px 0; font-size: 18px; font-weight: bold;">Join Microsoft Teams Meeting</h3>
+                    
+                    <div style="margin: 15px 0;">
+                        <a href="{join_url}" style="display: inline-block; padding: 12px 20px; background-color: #6264a7; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">Click here to join the meeting</a>
+                    </div>
+                    
+                    <div style="margin: 20px 0; line-height: 1.6; color: #333;">"""
+            
+            # Add phone dial-in information if available
+            if conference_id:
+                # Extract phone number from dial_in_url or use default
+                phone_number = "+1 323-849-4874"  # Default US number
+                teams_section += f"""
+                        <p style="margin: 5px 0; font-size: 14px;"><strong>{phone_number}</strong> &nbsp;&nbsp; United States, Los Angeles (Toll)</p>
+                        <p style="margin: 5px 0; font-size: 14px;"><strong>Conference ID:</strong> {conference_id}#</p>
+                        """
+            
+            # Add footer links
+            teams_section += f"""
+                        <p style="margin: 15px 0 5px 0; font-size: 14px;">
+                            <a href="{dial_in_url if dial_in_url else '#'}" style="color: #6264a7; text-decoration: none;">Local numbers</a> |
+                            <a href="#" style="color: #6264a7; text-decoration: none;">Reset PIN</a> |
+                            <a href="https://aka.ms/JoinTeamsMeeting" style="color: #6264a7; text-decoration: none;">Learn more about Teams</a> |
+                            <a href="{join_url}" style="color: #6264a7; text-decoration: none;">Meeting Options</a>
+                        </p>
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+            """
+            
+            return teams_section.strip()
+
+    def _generate_zoom_meeting_section(self, online_meeting_info: dict) -> str:
+        """
+        Generate a Zoom meeting section in a clean format for email bodies.
+        
+        Args:
+            online_meeting_info (dict): Dictionary containing Zoom meeting details
+            
+        Returns:
+            str: HTML formatted Zoom meeting section
+        """
+        join_url = online_meeting_info.get('join_url', '')
+        meeting_id = online_meeting_info.get('meeting_id', 'N/A')
+        passcode = online_meeting_info.get('passcode', 'N/A')
+        dial_in_numbers = online_meeting_info.get('dial_in_numbers', 'See meeting details')
+        
+        # Generate the Zoom meeting section in a clean format
+        zoom_section = f"""
+<div style="background-color: #f8f9fa; padding: 20px; border-left: 4px solid #2d8cff; border-radius: 4px; margin: 20px 0;">
+    <h3 style="color: #2d8cff; margin: 0 0 15px 0; font-size: 18px; font-weight: bold;">Join Zoom Meeting</h3>
+    
+    <table cellpadding="8" cellspacing="0" style="width: 100%; margin: 15px 0;">
+        <tr>
+            <td style="padding: 12px; background-color: #2d8cff; border-radius: 6px; text-align: center;">
+                <a href="{join_url}" style="color: white; text-decoration: none; font-weight: bold; font-size: 16px; display: block;">Click here to join the meeting</a>
+            </td>
+        </tr>
+    </table>
+    
+    <table cellpadding="8" cellspacing="0" style="width: 100%; background-color: #e3f2fd; padding: 15px; border-radius: 4px; margin: 15px 0;">
+        <tr>
+            <td>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Meeting ID:</strong> <span style="font-family: monospace;">{meeting_id}</span></p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Passcode:</strong> <span style="font-family: monospace;">{passcode}</span></p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>One tap mobile:</strong><br/>
+                <a href="tel:{dial_in_numbers}" style="color: #2d8cff; text-decoration: none; font-family: monospace; font-size: 13px;">{dial_in_numbers}</a></p>
+            </td>
+        </tr>
+    </table>
+    
+    <table cellpadding="8" cellspacing="0" style="width: 100%; margin: 10px 0;">
+        <tr>
+            <td style="font-size: 12px; color: #666; line-height: 1.4;">
+                <a href="https://zoom.us/download" style="color: #2d8cff; text-decoration: none;">Download Zoom</a> | 
+                <a href="https://zoom.us/test" style="color: #2d8cff; text-decoration: none;">Test your setup</a> | 
+                <a href="https://support.zoom.us/hc/en-us" style="color: #2d8cff; text-decoration: none;">Zoom Help</a>
+            </td>
+        </tr>
+    </table>
+</div>
+        """
+        
+        return zoom_section.strip()    
+    
     # Create Microsoft Teams meeting
     @trace_async_method("create_teams_meeting")
     async def create_teams_meeting(self, user_id: str, subject: str, start: str, end: str, body: str = None) -> dict:
