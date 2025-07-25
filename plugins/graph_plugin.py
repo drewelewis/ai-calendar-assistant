@@ -84,7 +84,7 @@ class GraphPlugin:
     ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
-        Search for users in Microsoft 365 Tenant Entra Directory using flexible filter criteria.
+        Search for users in Microsoft 365 Tenant Entra Directory using Microsoft Graph OData filter criteria.
         
         USE THIS WHEN:
         - User asks to "find", "search for", or "look up" specific users
@@ -93,32 +93,86 @@ class GraphPlugin:
         - Looking for executives, managers, or specific roles
         
         CAPABILITIES:
-        - Uses OData query language for powerful filtering
+        - Uses Microsoft Graph OData query language for filtering
         - Automatically excludes users without active mailboxes by default
         - Supports complex queries with multiple criteria
         - Case-insensitive searches
         
-        COMMON USE CASES:
-        - "Find the CEO" or "Who is the Chief Executive Officer?"
-        - "Show me all managers in the Engineering department"
-        - "Find John Smith" or "Look up users named Sarah"
-        - "Who works in the Sales department?"
+        SUPPORTED ODATA OPERATORS (Microsoft Graph Limitations):
         
-        FILTER EXAMPLES:
+        BASIC OPERATORS (Always Available):
+        - eq (equals): displayName eq 'John Doe'
+        - startswith: startswith(displayName,'John')
+        - in (value in list): department in ('Sales', 'Marketing')
+        - and/or: department eq 'Sales' and jobTitle eq 'Manager'
+        
+        ADVANCED OPERATORS (Require special headers - use sparingly):
+        - ne (not equals): companyName ne null
+        - endswith: endswith(mail,'@company.com')
+        - not: not(department eq 'Sales')
+        - lt/le/gt/ge: registrationDateTime ge 2021-01-01T00:00:00Z
+        
+        NOT SUPPORTED:
+        - contains() - Use startswith() instead or $search parameter
+        - Complex string matching beyond startswith/endswith
+        
+        LAMBDA OPERATORS (For Collections):
+        - any: assignedLicenses/any(s:s/skuId eq 'license-guid')
+        
+        RECOMMENDED FILTER PATTERNS:
+        
+        Name Searches:
         - startswith(displayName,'John') - Find users whose name starts with "John"
+        - startswith(givenName,'Sarah') - Find by first name
+        - startswith(surname,'Smith') - Find by last name
+        
+        Job/Department Searches:
         - jobTitle eq 'Manager' - Find all managers
         - department eq 'Engineering' - Find all Engineering employees
         - department eq 'Sales' and jobTitle eq 'Manager' - Find Sales managers
-        - contains(displayName,'Smith') - Find users with "Smith" in their name
+        
+        Multiple Properties Search:
+        - startswith(displayName,'mary') or startswith(givenName,'mary') or startswith(surname,'mary')
+        
+        Email Domain:
+        - Advanced only: endswith(mail,'@company.com')
+        
+        Active Users:
+        - accountEnabled eq true
+        
+        Multiple Departments:
+        - department in ('Sales', 'Marketing', 'Engineering')
+        
+        IMPORTANT NOTES:
+        - For partial name matching, use multiple startswith() with OR
+        - contains() does NOT work for user searches - will cause errors
+        - Complex filters may require advanced query capabilities
+        - Keep filters simple for best performance and reliability
+        
+        COMMON USE CASES:
+        - "Find the CEO" → jobTitle eq 'Chief Executive Officer'
+        - "Show me all managers in Engineering" → department eq 'Engineering' and jobTitle eq 'Manager'
+        - "Find John Smith" → startswith(displayName,'John') and startswith(surname,'Smith')
+        - "Who works in Sales?" → department eq 'Sales'
+        - "Find anyone named Sarah" → startswith(displayName,'Sarah') or startswith(givenName,'Sarah')
         """
     )
-    async def user_search(self, filter: Annotated[str, "User search filter parameter. Use OData query syntax to filter users."], include_inactive_mailboxes: Annotated[bool, "Set to true to include users without active mailboxes. Default is false."] = False) -> Annotated[List[dict], "Returns a list of users matching the filter criteria, excluding users without mailboxes by default."]:
+    async def user_search(
+        self, 
+        filter: Annotated[str, "User search filter using Microsoft Graph OData syntax. Use eq, startswith, in, and/or operators. Do NOT use contains()."], 
+        include_inactive_mailboxes: Annotated[bool, "Set to true to include users without active mailboxes. Default is false."] = False
+    ) -> Annotated[List[dict], "Returns a list of users matching the filter criteria, excluding users without mailboxes by default."]:
         self._log_function_call("user_search", filter=filter, include_inactive_mailboxes=include_inactive_mailboxes)
         self._send_friendly_notification("🔍 Searching for users in your directory...")
-        if not filter: raise ValueError("Error: filter parameter is empty")
+        if not filter: 
+            raise ValueError("Error: filter parameter is empty")
         try:
             # Using a synchronous approach here
-            result = await graph_operations.search_users(filter, max_results=max_results, exclude_inactive_mailboxes=not include_inactive_mailboxes)
+            result = await graph_operations.search_users(
+                filter, 
+                max_results=max_results, 
+                exclude_inactive_mailboxes=not include_inactive_mailboxes
+            )
             return self._convert_to_dict(result) if result else []
         except Exception as e:
             print(f"Error in user_search: {e}")

@@ -674,9 +674,49 @@ class GraphOperations:
         
         return GenericProxy(data)
 
+    def _is_cacheable_result(self, result) -> bool:
+        """
+        Determine if a result should be cached based on cache-aside pattern.
+        
+        Empty results are not cached to avoid caching temporary states:
+        - None values
+        - Empty lists []
+        - Empty dictionaries {}
+        - Empty strings ""
+        - Empty tuples ()
+        - Empty sets set()
+        
+        Args:
+            result: The result to evaluate for caching
+            
+        Returns:
+            bool: True if result should be cached, False otherwise
+        """
+        # Handle None explicitly
+        if result is None:
+            return False
+        
+        # Handle collections (list, dict, tuple, set)
+        if hasattr(result, '__len__'):
+            return len(result) > 0
+        
+        # Handle strings specifically (they have __len__ but need special handling)
+        if isinstance(result, str):
+            return bool(result.strip())  # Don't cache empty or whitespace-only strings
+        
+        # For other types (numbers, booleans, custom objects), cache them
+        # This includes False, 0, etc. which are valid results to cache
+        return True    
+
     @trace_async_method("cache_wrapper")
     async def _cache_wrapper(self, method_name: str, cache_type: str, method_func, *args, **kwargs):
-        """Generic cache wrapper for Graph API methods with comprehensive telemetry."""
+        """Generic cache wrapper for Graph API methods with comprehensive telemetry.
+        
+        Implements cache-aside pattern with the following behavior:
+        - Empty results (None, [], {}, empty strings) are NOT cached
+        - Only successful non-empty results are cached
+        - Cache misses always call the underlying method
+        """
         # Generate cache key
         cache_key = self._generate_cache_key(method_name, *args, **kwargs)
         
@@ -698,12 +738,16 @@ class GraphOperations:
             result = await method_func(*args, **kwargs)
             api_duration = time.time() - api_start_time
             
-            # Cache the result
-            ttl = self.cache_ttl_config.get(cache_type, self.cache_ttl)
-            await self._set_cache(cache_key, result, ttl)
+            # Only cache non-empty results (cache-aside pattern)
+            if self._is_cacheable_result(result):
+                ttl = self.cache_ttl_config.get(cache_type, self.cache_ttl)
+                await self._set_cache(cache_key, result, ttl)
+                cache_status = f"cached for {ttl}s"
+            else:
+                cache_status = "not cached (empty result)"
             
             total_duration = time.time() - operation_start
-            console_info(f"✅ {method_name} completed: API={api_duration:.2f}s, Total={total_duration:.2f}s (cached for {ttl}s)", "GraphOps")
+            console_info(f"✅ {method_name} completed: API={api_duration:.2f}s, Total={total_duration:.2f}s ({cache_status})", "GraphOps")
             return result
             
         except Exception as e:
@@ -1102,20 +1146,18 @@ class GraphOperations:
             console_debug(f"Could not determine if {user_id} is conference room: {e}", "GraphOps")
             return False
     
-    async def _invalidate_calendar_cache(self, user_id: str, event_id: str = None, operation: str = "update", location: str = None) -> None:
+    async def _invalidate_calendar_cache(self, user_id: str, operation: str = "update", location: str = None) -> None:
         """
         Invalidate calendar-related cache entries for a specific user and optionally event.
         
         This method ensures data consistency by clearing cache entries for:
-        - get_user_calendar_events_by_user_id() - calendar event lists for the user
-        - get_calendar_event_by_id() - specific event details (when event_id provided)
+        - get_user_calendar_events_by_user_id() - calendar event lists for the user        
         - get_conference_room_events() - conference room events (if user is a conference room)
         - get_all_conference_rooms() - conference room list (if user is a conference room)
         - Any other calendar-related cached methods
         
         Args:
-            user_id (str): The user ID whose calendar caches should be invalidated
-            event_id (str, optional): Specific event ID to invalidate (if provided)
+            user_id (str): The user ID whose calendar caches should be invalidated            
             operation (str): The operation being performed (for logging)
             location (str, optional): Location of the event (to detect conference room involvement)
         """
@@ -1158,14 +1200,7 @@ class GraphOperations:
                     console_debug(f"User {user_id} identified as conference room - invalidating room caches", "GraphOps")
                 if location_suggests_room:
                     console_debug(f"Location '{location}' suggests conference room - invalidating room caches", "GraphOps")
-            
-            # If specific event, also invalidate event-specific caches
-            if event_id:
-                patterns_to_invalidate.extend([
-                    f"graph:get_calendar_event_by_id:*",          # Specific event lookups
-                    f"graph:*{event_id}*"                        # Any cache entries containing the event_id
-                ])
-            
+                        
             # Invalidate each pattern
             total_deleted = 0
             for pattern in patterns_to_invalidate:
@@ -1175,8 +1210,7 @@ class GraphOperations:
             
             console_debug(f"Calendar cache invalidation after {operation}: {total_deleted} keys deleted for user {user_id}", "GraphOps")
             console_telemetry_event("calendar_cache_invalidation", {
-                "user_id": user_id,
-                "event_id": event_id,
+                "user_id": user_id,                
                 "operation": operation,
                 "deleted_keys": total_deleted,
                 "patterns_count": len(patterns_to_invalidate),
@@ -1380,7 +1414,7 @@ class GraphOperations:
                 }
                 
             # Extract user display name from the User object
-            display_name = getattr(user, 'displayName', 'Unknown')
+            display_name = getattr(user, 'display_name', 'Unknown')
             
             # Check for valid Exchange Online mailbox using Microsoft Graph API
             # A "valid mailbox" means the user has an Exchange Online mailbox provisioned
@@ -2277,7 +2311,7 @@ class GraphOperations:
             }, "GraphOps")
             
             # Invalidate calendar list caches since we added a new event
-            await self._invalidate_calendar_cache(user_id, event_id, 'create', location)
+            await self._invalidate_calendar_cache(user_id, 'create', location)
             
             return created_event
             
@@ -2386,435 +2420,6 @@ class GraphOperations:
             traceback.print_exc()
             return None
     
-    # Update calendar event by event ID
-    @trace_async_method("update_calendar_event", include_args=True)
-    async def update_calendar_event(self, user_id: str, event_id: str, subject: str = None, start: str = None, end: str = None, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None) -> Event:
-        """
-        Update an existing calendar event by event ID.
-        
-        Args:
-            user_id (str): The ID of the user who owns the calendar event
-            event_id (str): The ID of the event to update
-            subject (str, optional): New subject/title of the event
-            start (str, optional): New start date and time in ISO 8601 format
-            end (str, optional): New end date and time in ISO 8601 format
-            location (str, optional): New location of the event
-            body (str, optional): New body content of the event
-            attendees (List[str], optional): New list of required attendee email addresses (replaces existing)
-            optional_attendees (List[str], optional): New list of optional attendee email addresses (replaces existing)
-            
-        Returns:
-            Event: The updated calendar event, or None if update failed
-        """
-        try:
-            console_info(f"Updating calendar event: {self._format_event_id(event_id)}", "GraphOps")
-            console_telemetry_event("calendar_event_update_start", {
-                "user_id": user_id,
-                "event_id": event_id,
-                "has_subject": subject is not None,
-                "has_start": start is not None,
-                "has_end": end is not None,
-                "has_location": location is not None,
-                "has_body": body is not None,
-                "has_attendees": attendees is not None,
-                "has_optional_attendees": optional_attendees is not None
-            }, "GraphOps")
-            
-            # First, get the existing event to preserve unchanged fields
-            existing_event = await self._get_client().users.by_user_id(user_id).calendar.events.by_event_id(event_id).get()
-            
-            if not existing_event:
-                console_warning(f"Event with ID {self._format_event_id(event_id)} not found for user {user_id}", "GraphOps")
-                console_telemetry_event("calendar_event_update_not_found", {
-                    "user_id": user_id,
-                    "event_id": event_id
-                }, "GraphOps")
-                return None
-            
-            console_debug(f"Updating calendar event: {self._format_event_id(event_id)}", "GraphOps")
-            
-            # Import required classes
-            from msgraph.generated.models.event import Event
-            from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
-            from msgraph.generated.models.location import Location
-            from msgraph.generated.models.item_body import ItemBody
-            from msgraph.generated.models.body_type import BodyType
-            from msgraph.generated.models.attendee import Attendee
-            from msgraph.generated.models.email_address import EmailAddress
-            
-            # Create update object with only the fields that are being changed
-            event_update = Event()
-            
-            # Update subject if provided
-            if subject is not None:
-                event_update.subject = subject
-                console_debug(f"Updating subject: {subject}", "GraphOps")
-            
-            # Update start time if provided
-            if start is not None:
-                event_update.start = DateTimeTimeZone(date_time=start, time_zone="UTC")
-                console_debug(f"Updating start time: {start}", "GraphOps")
-            
-            # Update end time if provided
-            if end is not None:
-                event_update.end = DateTimeTimeZone(date_time=end, time_zone="UTC")
-                console_debug(f"Updating end time: {end}", "GraphOps")
-            
-            # Update location if provided
-            if location is not None:
-                event_update.location = Location(display_name=location)
-                console_debug(f"Updating location: {location}", "GraphOps")
-            
-            # Update body if provided
-            if body is not None:
-                # If no body is provided but we want to clear it, use empty string
-                enhanced_body = body or ""
-                
-                # If body is provided but empty, create a minimal default
-                if not enhanced_body.strip():
-                    enhanced_body = f"""
-<html>
-<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333;">
-    <p style="margin: 8px 0;">This meeting has been updated via the AI Calendar Assistant.</p>
-</body>
-</html>
-                    """.strip()
-                
-                event_update.body = ItemBody(content_type=BodyType.Html, content=enhanced_body)
-                body_preview = enhanced_body[:100] + "..." if len(enhanced_body) > 100 else enhanced_body
-                console_debug(f"Updating body: {body_preview}", "GraphOps")
-            
-            # Update attendees if provided (this replaces all existing attendees)
-            if attendees is not None or optional_attendees is not None:
-                event_update.attendees = []
-                
-                # Add required attendees
-                if attendees:
-                    for attendee in attendees:
-                        email_address = EmailAddress(address=attendee)
-                        attendee_obj = Attendee(email_address=email_address)
-                        attendee_obj.type = "required"
-                        event_update.attendees.append(attendee_obj)
-                    console_debug(f"Adding {len(attendees)} required attendees: {', '.join(attendees)}", "GraphOps")
-                
-                # Add optional attendees
-                if optional_attendees:
-                    for attendee in optional_attendees:
-                        email_address = EmailAddress(address=attendee)
-                        attendee_obj = Attendee(email_address=email_address)
-                        attendee_obj.type = "optional"
-                        event_update.attendees.append(attendee_obj)
-                    console_debug(f"Adding {len(optional_attendees)} optional attendees: {', '.join(optional_attendees)}", "GraphOps")
-                
-                if not attendees and not optional_attendees:
-                    console_debug("Clearing all attendees", "GraphOps")
-            
-            # Update the event in the user's calendar
-            updated_event = await self._get_client().users.by_user_id(user_id).calendar.events.by_event_id(event_id).patch(event_update)
-            
-            # Log the successful update
-            formatted_id = self._format_event_id(event_id)
-            updated_subject = getattr(updated_event, 'subject', 'Unknown Subject')
-            console_info(f"Calendar event updated successfully: {updated_subject} (ID: {formatted_id})", "GraphOps")
-            console_telemetry_event("calendar_event_update_success", {
-                "user_id": user_id,
-                "event_id": event_id,
-                "subject": updated_subject
-            }, "GraphOps")
-            
-            # Invalidate related cache entries after successful update
-            await self._invalidate_calendar_cache(user_id, event_id, "update", location)
-            
-            return updated_event
-            
-        except Exception as e:
-            formatted_id = self._format_event_id(event_id)
-            
-            # Categorize and log the error with enhanced context
-            error_info = self._categorize_graph_error(e, "update_calendar_event", {
-                "user_id": user_id,
-                "event_id": event_id,
-                "has_subject": subject is not None,
-                "has_start": start is not None,
-                "has_end": end is not None
-            })
-            
-            console_error(f"Failed to update calendar event {formatted_id}: {e}", "GraphOps")
-            console_telemetry_event("calendar_event_update_failed", {
-                "user_id": user_id,
-                "event_id": event_id,
-                "error": str(e),
-                "error_category": error_info["category"],
-                "error_severity": error_info["severity"],
-                "suggested_action": error_info["suggested_action"]
-            }, "GraphOps")
-            print("Full traceback:")
-            traceback.print_exc()
-            return None
-    
-    # Update calendar event with online meeting support
-    @trace_async_method("update_calendar_event_with_online_meeting", include_args=True)
-    async def update_calendar_event_with_online_meeting(self, user_id: str, event_id: str, subject: str = None, start: str = None, end: str = None, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_online_meeting: bool = False, meeting_platform: str = None) -> Event:
-        """
-        Update a calendar event with optional online meeting integration (Zoom or Teams).
-        
-        Args:
-            user_id (str): The ID of the user who owns the calendar event
-            event_id (str): The ID of the event to update
-            subject (str, optional): New subject/title of the event
-            start (str, optional): New start date and time in ISO 8601 format
-            end (str, optional): New end date and time in ISO 8601 format
-            location (str, optional): New location of the event
-            body (str, optional): New body content of the event
-            attendees (List[str], optional): New list of required attendee email addresses
-            optional_attendees (List[str], optional): New list of optional attendee email addresses
-            create_online_meeting (bool): Whether to create a new online meeting
-            meeting_platform (str): Platform choice - defaults to 'teams', can specify 'zoom'
-            
-        Returns:
-            Event: The updated calendar event with online meeting info if requested
-            
-        Raises:
-            ValueError: If platform is invalid
-        """
-        try:
-            online_meeting_info = None
-            enhanced_body = body
-            enhanced_location = location
-            
-            # Create online meeting if requested
-            if create_online_meeting:
-                # Default to Teams if no platform specified
-                if meeting_platform is None:
-                    meeting_platform = 'teams'
-                    print("ℹ️ No platform specified for update, defaulting to Microsoft Teams")
-                    
-                # Use existing subject and times if not provided for the meeting
-                existing_event = await self.get_calendar_event_by_id(user_id, event_id)
-                if existing_event:
-                    meeting_subject = subject or getattr(existing_event, 'subject', 'Updated Meeting')
-                    meeting_start = start or (getattr(existing_event.start, 'date_time', None) if hasattr(existing_event, 'start') and existing_event.start else None)
-                    meeting_end = end or (getattr(existing_event.end, 'date_time', None) if hasattr(existing_event, 'end') and existing_event.end else None)
-                    
-                    if meeting_start and meeting_end:
-                        online_meeting_info = await self.create_online_meeting(user_id, meeting_subject, meeting_start, meeting_end, meeting_platform)
-                        
-                        if online_meeting_info:
-                            platform_name = meeting_platform.title()
-                            print(f"✅ {platform_name} meeting created for event update")
-                            
-                            # Enhance location to include meeting info
-                            if meeting_platform.lower() == 'teams':
-                                enhanced_location = f"Microsoft Teams Meeting - {online_meeting_info.get('join_url', 'Join URL not available')}"
-                            elif meeting_platform.lower() == 'zoom':
-                                enhanced_location = f"Zoom Meeting - {online_meeting_info.get('join_url', 'Join URL not available')}"
-                            
-                            # Enhance body to include meeting section
-                            if enhanced_body is None:
-                                enhanced_body = ""
-                            
-                            # Add meeting section to body
-                            if meeting_platform.lower() == 'teams':
-                                meeting_section = self._generate_teams_meeting_section(online_meeting_info)
-                            elif meeting_platform.lower() == 'zoom':
-                                meeting_section = self._generate_zoom_meeting_section(online_meeting_info)
-                            
-                            if enhanced_body:
-                                enhanced_body += meeting_section
-                            else:
-                                enhanced_body = f"""
-<html>
-<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333;">
-    <p>This meeting has been updated with {platform_name} integration.</p>
-    {meeting_section}
-</body>
-</html>
-                                """.strip()
-                        else:
-                            print(f"❌ Failed to create {meeting_platform} meeting for event update")
-                    else:
-                        print("❌ Cannot create online meeting - missing start/end times")
-                else:
-                    print("❌ Cannot create online meeting - existing event not found")
-            
-            # Update the calendar event with the enhanced content
-            updated_event = await self.update_calendar_event(
-                user_id=user_id,
-                event_id=event_id,
-                subject=subject,
-                start=start,
-                end=end,
-                location=enhanced_location,
-                body=enhanced_body,
-                attendees=attendees,
-                optional_attendees=optional_attendees
-            )
-            
-            # Log online meeting info if created
-            if online_meeting_info:
-                teams_meeting_id = online_meeting_info.get('id', 'N/A')
-                formatted_teams_id = self._format_event_id(teams_meeting_id)
-                print(f"📋 Online meeting linked to updated event: {formatted_teams_id}")
-            
-            return updated_event
-            
-        except Exception as e:
-            formatted_id = self._format_event_id(event_id)
-            print(f"❌ Failed to update calendar event with online meeting {formatted_id}: {e}")
-            print("Full traceback:")
-            traceback.print_exc()
-            return None
-    
-    # Convenience method for partial calendar event updates
-    @trace_async_method("patch_calendar_event", include_args=True)
-    async def patch_calendar_event(self, user_id: str, event_id: str, **kwargs) -> Event:
-        """
-        Convenience method to update specific fields of a calendar event.
-        
-        Args:
-            user_id (str): The ID of the user who owns the calendar event
-            event_id (str): The ID of the event to update
-            **kwargs: Fields to update (subject, start, end, location, body, attendees, optional_attendees)
-            
-        Returns:
-            Event: The updated calendar event, or None if update failed
-            
-        Example:
-            # Update only the subject and location
-            updated_event = await graph_ops.patch_calendar_event(
-                user_id="user-123", 
-                event_id="event-456", 
-                subject="New Meeting Title",
-                location="Conference Room B"
-            )
-        """
-        return await self.update_calendar_event(
-            user_id=user_id,
-            event_id=event_id,
-            subject=kwargs.get('subject'),
-            start=kwargs.get('start'),
-            end=kwargs.get('end'),
-            location=kwargs.get('location'),
-            body=kwargs.get('body'),
-            attendees=kwargs.get('attendees'),
-            optional_attendees=kwargs.get('optional_attendees')
-        )
-    
-    def _generate_teams_meeting_section(self, meeting_info: dict) -> str:
-        """
-        Generate a Teams meeting section in the standard format for email bodies.
-        
-        Args:
-            meeting_info (dict): Meeting information from create_teams_meeting
-            
-        Returns:
-            str: HTML formatted Teams meeting section
-        """
-        join_url = meeting_info.get('join_url', '')
-        conference_id = meeting_info.get('conference_id', '')
-        dial_in_url = meeting_info.get('dial_in_url', '')
-        
-        # Debug logging to check what we received
-        print(f"🔍 Teams meeting section: Join URL={join_url}, Conference ID={conference_id}")
-        
-        # If no join_url, this is a problem - use a fallback or show error
-        if not join_url:
-            print("⚠️ WARNING: No join URL provided for Teams meeting section!")
-            join_url = "https://teams.microsoft.com/l/meetup-join/[MISSING-JOIN-URL]"
-        
-        # Generate the Teams meeting section in the requested format
-        teams_section = f"""
-<div style="margin-top: 30px; padding: 20px; border-top: 2px solid #6264a7; background-color: #f8f9fa;">
-    <table cellpadding="0" cellspacing="0" style="width: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-        <tr>
-            <td>
-                <h3 style="color: #6264a7; margin: 0 0 15px 0; font-size: 18px; font-weight: bold;">Join Microsoft Teams Meeting</h3>
-                
-                <div style="margin: 15px 0;">
-                    <a href="{join_url}" style="display: inline-block; padding: 12px 20px; background-color: #6264a7; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">Click here to join the meeting</a>
-                </div>
-                
-                <div style="margin: 20px 0; line-height: 1.6; color: #333;">"""
-        
-        # Add phone dial-in information if available
-        if conference_id:
-            # Extract phone number from dial_in_url or use default
-            phone_number = "+1 323-849-4874"  # Default US number
-            teams_section += f"""
-                    <p style="margin: 5px 0; font-size: 14px;"><strong>{phone_number}</strong> &nbsp;&nbsp; United States, Los Angeles (Toll)</p>
-                    <p style="margin: 5px 0; font-size: 14px;"><strong>Conference ID:</strong> {conference_id}#</p>
-                    """
-        
-        # Add footer links
-        teams_section += f"""
-                    <p style="margin: 15px 0 5px 0; font-size: 14px;">
-                        <a href="{dial_in_url if dial_in_url else '#'}" style="color: #6264a7; text-decoration: none;">Local numbers</a> |
-                        <a href="#" style="color: #6264a7; text-decoration: none;">Reset PIN</a> |
-                        <a href="https://aka.ms/JoinTeamsMeeting" style="color: #6264a7; text-decoration: none;">Learn more about Teams</a> |
-                        <a href="{join_url}" style="color: #6264a7; text-decoration: none;">Meeting Options</a>
-                    </p>
-                </div>
-            </td>
-        </tr>
-    </table>
-</div>
-        """
-        
-        return teams_section.strip()
-
-    def _generate_zoom_meeting_section(self, online_meeting_info: dict) -> str:
-        """
-        Generate a Zoom meeting section in a clean format for email bodies.
-        
-        Args:
-            online_meeting_info (dict): Dictionary containing Zoom meeting details
-            
-        Returns:
-            str: HTML formatted Zoom meeting section
-        """
-        join_url = online_meeting_info.get('join_url', '')
-        meeting_id = online_meeting_info.get('meeting_id', 'N/A')
-        passcode = online_meeting_info.get('passcode', 'N/A')
-        dial_in_numbers = online_meeting_info.get('dial_in_numbers', 'See meeting details')
-        
-        # Generate the Zoom meeting section in a clean format
-        zoom_section = f"""
-<div style="background-color: #f8f9fa; padding: 20px; border-left: 4px solid #2d8cff; border-radius: 4px; margin: 20px 0;">
-    <h3 style="color: #2d8cff; margin: 0 0 15px 0; font-size: 18px; font-weight: bold;">Join Zoom Meeting</h3>
-    
-    <table cellpadding="8" cellspacing="0" style="width: 100%; margin: 15px 0;">
-        <tr>
-            <td style="padding: 12px; background-color: #2d8cff; border-radius: 6px; text-align: center;">
-                <a href="{join_url}" style="color: white; text-decoration: none; font-weight: bold; font-size: 16px; display: block;">Click here to join the meeting</a>
-            </td>
-        </tr>
-    </table>
-    
-    <table cellpadding="8" cellspacing="0" style="width: 100%; background-color: #e3f2fd; padding: 15px; border-radius: 4px; margin: 15px 0;">
-        <tr>
-            <td>
-                <p style="margin: 5px 0; font-size: 14px;"><strong>Meeting ID:</strong> <span style="font-family: monospace;">{meeting_id}</span></p>
-                <p style="margin: 5px 0; font-size: 14px;"><strong>Passcode:</strong> <span style="font-family: monospace;">{passcode}</span></p>
-                <p style="margin: 5px 0; font-size: 14px;"><strong>One tap mobile:</strong><br/>
-                <a href="tel:{dial_in_numbers}" style="color: #2d8cff; text-decoration: none; font-family: monospace; font-size: 13px;">{dial_in_numbers}</a></p>
-            </td>
-        </tr>
-    </table>
-    
-    <table cellpadding="8" cellspacing="0" style="width: 100%; margin: 10px 0;">
-        <tr>
-            <td style="font-size: 12px; color: #666; line-height: 1.4;">
-                <a href="https://zoom.us/download" style="color: #2d8cff; text-decoration: none;">Download Zoom</a> | 
-                <a href="https://zoom.us/test" style="color: #2d8cff; text-decoration: none;">Test your setup</a> | 
-                <a href="https://support.zoom.us/hc/en-us" style="color: #2d8cff; text-decoration: none;">Zoom Help</a>
-            </td>
-        </tr>
-    </table>
-</div>
-        """
-        
-        return zoom_section.strip()
-
     # Create Microsoft Teams meeting
     @trace_async_method("create_teams_meeting")
     async def create_teams_meeting(self, user_id: str, subject: str, start: str, end: str, body: str = None) -> dict:
@@ -3157,7 +2762,7 @@ class GraphOperations:
                 }, "GraphOps")
             
             # Invalidate calendar list caches since we added a new event
-            await self._invalidate_calendar_cache(user_id, event_id, 'create_with_online_meeting', location)
+            await self._invalidate_calendar_cache(user_id, 'create_with_online_meeting', location)
             
             return created_event
             
