@@ -11,7 +11,7 @@ def completion(query: str) -> str:
     messages.insert(0, OpenAIModels.Message(role="system", content=prompt))
     messages.append(OpenAIModels.Message(role="user", content=query))
 
-    client = azure_openai_client.client()
+    client = azure_openai_client.OpenAIClient()
     completion = client.completion(messages, max_tokens=10000)
     try:
         message=completion.choices[0].message.content
@@ -26,7 +26,7 @@ def chat(messages: list[OpenAIModels.Message]) -> str:
         prompt = os.getenv("OPENAI_PROMPT", "You are a helpful assistant.")
         messages.insert(0, OpenAIModels.Message(role="system", content=prompt))
 
-    client = azure_openai_client.client()
+    client = azure_openai_client.OpenAIClient()
     completion = client.completion(messages=messages, max_tokens=10000)
     try:
         message=completion.choices[0].message.content
@@ -43,7 +43,7 @@ def agentic_chat(messages: list[OpenAIModels.Message]) -> str:
         prompt = os.getenv("OPENAI_PROMPT", "You are a helpful assistant.")
         messages.insert(0, OpenAIModels.Message(role="system", content=prompt))
 
-    client = azure_openai_client.client()
+    client = azure_openai_client.OpenAIClient()
     completion = client.completion(messages=messages, max_tokens=10000)
     try:
         message=completion.choices[0].message.content
