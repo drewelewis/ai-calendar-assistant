@@ -21,6 +21,7 @@ from plugins.azure_maps_plugin import AzureMapsPlugin
 from plugins.risk_plugin import RiskPlugin
 from prompts.graph_prompts import prompts
 from utils.teams_utilities import TeamsUtilities
+from utils.thread_utilities import ThreadUtilities
 
 # Import telemetry components
 from telemetry.config import initialize_telemetry, get_telemetry
@@ -61,6 +62,9 @@ class MultiAgentOrchestrator:
         
         # Initialize Teams utilities
         self.teams_utils = TeamsUtilities()
+        
+        # Initialize Thread utilities for ensuring system/instruction messages
+        self.thread_utils = ThreadUtilities()
         
         # Create the kernel
         self.kernel = Kernel()
@@ -536,6 +540,12 @@ Session ID: {self.session_id}
                 # Add other potential missing methods
                 if not hasattr(thread, 'channel_id'):
                     thread.channel_id = self.session_id
+
+                # Ensure system and instruction messages are present
+                try:
+                    thread = await self.thread_utils.ensure_system_and_instruction_messages(thread, self.session_id, prompts, self.logger)
+                except Exception as e:
+                    self.logger.warning(f"Failed to ensure system/instruction messages on thread: {e}")
                 
                 # Add message to thread - keep it simple
                 # The AgentGroupChat will handle the conversation flow

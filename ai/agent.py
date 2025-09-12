@@ -25,6 +25,7 @@ from plugins.azure_maps_plugin import AzureMapsPlugin
 from plugins.risk_plugin import RiskPlugin
 from prompts.graph_prompts import prompts
 from utils.teams_utilities import TeamsUtilities
+from utils.thread_utilities import ThreadUtilities
 
 # Initialize TeamsUtilities for sending messages
 teams_utils = TeamsUtilities()
@@ -156,6 +157,12 @@ class Agent:
         else:
             self.logger.info("ℹ COSMOS_ENDPOINT not configured. Chat history will not be persisted.")
             self.cosmos_manager = None
+        
+        # Initialize Teams utilities for sending messages
+        self.teams_utils = TeamsUtilities()
+        
+        # Initialize Thread utilities for ensuring system/instruction messages
+        self.thread_utils = ThreadUtilities()
         
         # 2. Create the Kernel and register plugins
         self.service_id = "agent"
@@ -450,77 +457,11 @@ class Agent:
                 self.logger.warning(f"Failed to record OpenAI API call metric: {e}")
             
             
-            # Check if we need to add initial messages (system and instructions)
-            has_system_message = False
-            
+            # Ensure initial system + instruction messages are present on the thread
             try:
-                # Get messages from the thread using the proper API
-                messages = []
-                
-                # Try different ways to access the message history
-                if hasattr(thread, '_chat_history') and hasattr(thread._chat_history, 'messages'):
-                    messages = thread._chat_history.messages
-                elif hasattr(thread, 'messages'):
-                    # Handle async generator case
-                    if hasattr(thread.messages, '__aiter__'):
-                        async for msg in thread.messages:
-                            messages.append(msg)
-                    elif hasattr(thread.messages, '__iter__'):
-                        # Handle iterable case
-                        messages = list(thread.messages)
-                    else:
-                        messages = thread.messages
-                
-                # Evaluate messages list to determine if we have a system message
-                # look at messages for a message with the role of SYSTEM
-
-                if any(msg.role == AuthorRole.SYSTEM for msg in messages):
-                    self.logger.debug("Found existing system message in thread")
-                    has_system_message = True
-                else:
-                    self.logger.debug("No existing system message found in thread")
-                    has_system_message = False
-                
+                thread = await self.thread_utils.ensure_system_and_instruction_messages(thread, self.session_id, prompts, self.logger)
             except Exception as e:
-                self.logger.debug(f"Could not check existing messages: {e}")
-                # Default to adding messages if we can't check
-                has_system_message = False
-
-            # Add system message and instructions if needed
-            if has_system_message== False:
-                def add_message_to_thread(message, message_type):
-                    """Helper function to add a message to the thread using available methods"""
-                    try:
-                        if hasattr(thread, 'add_chat_message'):
-                            thread.add_chat_message(message)
-                            self.logger.debug(f"Added {message_type} using add_chat_message")
-                        elif hasattr(thread, 'add_message'):
-                            thread.add_message(message)
-                            self.logger.debug(f"Added {message_type} using add_message")
-                        elif hasattr(thread, '_chat_history') and hasattr(thread._chat_history, 'add_message'):
-                            thread._chat_history.add_message(message)
-                            self.logger.debug(f"Added {message_type} using _chat_history.add_message")
-                        elif hasattr(thread, '_chat_history') and hasattr(thread._chat_history, 'messages'):
-                            thread._chat_history.messages.append(message)
-                            self.logger.debug(f"Added {message_type} by appending to messages list")
-                        else:
-                            self.logger.warning(f"Could not find method to add {message_type} to thread")
-                    except Exception as e:
-                        self.logger.error(f"Failed to add {message_type} to thread: {e}")
-
-                # Add system message
-                system_message = ChatMessageContent(
-                    role=AuthorRole.SYSTEM, 
-                    content=prompts.system_message(self.session_id)
-                )
-                add_message_to_thread(system_message, "system message")
-
-                # Add instruction message with the system message
-                instruction_message = ChatMessageContent(
-                    role=AuthorRole.USER, 
-                    content=prompts.instructions(self.session_id)
-                )
-                add_message_to_thread(instruction_message, "instruction message")
+                self.logger.warning(f"Failed to ensure system/instruction messages on thread: {e}")
 
             # Track the OpenAI API call with token information
             with TelemetryContext(operation="openai_chat_completion", model=self.deployment_name):
