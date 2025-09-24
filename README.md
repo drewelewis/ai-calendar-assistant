@@ -138,24 +138,24 @@ flowchart LR
   %% === Clients / Entry ===
   subgraph Clients
     User[Web / API Client]
-    TeamsDM[Teams Direct Message\n(Outbound Notify)]
+    TeamsDM[Teams Direct Message<br/>(Outbound Notify)]
   end
 
   %% === Application (Azure Container Apps) ===
-  subgraph App["Azure Container App\nFastAPI + Agents"]
-    FastAPI[FastAPI API Layer\n/chat, /agent_chat, /multi_agent_chat, /health]
-    Orchestrator[Agent + MultiAgent\nOrchestrator]
-    LLMAnalytics[LLM Token & Cost\nAnalytics]
+  subgraph App["Azure Container App<br/>FastAPI + Agents"]
+    FastAPI[FastAPI API Layer<br/>/chat /agent_chat /multi_agent_chat /health]
+    Orchestrator[Agent + MultiAgent<br/>Orchestrator]
+    LLMAnalytics[LLM Token & Cost<br/>Analytics]
   end
 
   %% === AI Model Layer ===
   subgraph OpenAI["Azure OpenAI"]
-    Model[(Model Deployment\n${OPENAI_MODEL_DEPLOYMENT_NAME})]
+    Model[(Model Deployment<br/>gpt-4.1)]
   end
 
   %% === Data & State ===
   subgraph Data["State & Persistence"]
-    Cosmos[(Cosmos DB\nChatHistory)]
+    Cosmos[(Cosmos DB<br/>ChatHistory)]
     Redis[(Azure Redis Cache)]
   end
 
@@ -169,7 +169,7 @@ flowchart LR
   %% === Identity & Secrets ===
   subgraph Identity["Identity & Secrets"]
     UAMI[(User Assigned Managed Identity)]
-    KV[(Key Vault\n(Entra secrets))]
+    KV[(Key Vault<br/>(Entra secrets))]
   end
 
   %% === Observability ===
