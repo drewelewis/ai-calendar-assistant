@@ -135,50 +135,43 @@ High-level deployment view of the currently implemented platform (infrastructure
 
 ```mermaid
 flowchart LR
-  %% === Clients / Entry ===
+  %% Simplified labels for GitHub Mermaid compatibility (no HTML or escaped newlines)
   subgraph Clients
     User[Web / API Client]
-    TeamsDM[Teams Direct Message<br/>(Outbound Notify)]
+    TeamsDM[Teams Direct Message Outbound]
   end
 
-  %% === Application (Azure Container Apps) ===
-  subgraph App["Azure Container App<br/>FastAPI + Agents"]
-    FastAPI[FastAPI API Layer<br/>/chat /agent_chat /multi_agent_chat /health]
-    Orchestrator[Agent + MultiAgent<br/>Orchestrator]
-    LLMAnalytics[LLM Token & Cost<br/>Analytics]
+  subgraph App
+    FastAPI[FastAPI API /chat /agent_chat /multi_agent_chat /health]
+    Orchestrator[Agent + MultiAgent Orchestrator]
+    LLMAnalytics[LLM Token & Cost Analytics]
   end
 
-  %% === AI Model Layer ===
-  subgraph OpenAI["Azure OpenAI"]
-    Model[(Model Deployment<br/>gpt-4.1)]
+  subgraph OpenAI
+    Model[(Model Deployment gpt-4.1)]
   end
 
-  %% === Data & State ===
-  subgraph Data["State & Persistence"]
-    Cosmos[(Cosmos DB<br/>ChatHistory)]
+  subgraph Data
+    Cosmos[(Cosmos DB ChatHistory)]
     Redis[(Azure Redis Cache)]
   end
 
-  %% === External Integrations ===
-  subgraph Integrations["External Services"]
+  subgraph Integrations
     Graph[Microsoft Graph]
     Maps[Azure Maps]
     TeamsNotify[Teams Notify Endpoint]
   end
 
-  %% === Identity & Secrets ===
-  subgraph Identity["Identity & Secrets"]
+  subgraph Identity
     UAMI[(User Assigned Managed Identity)]
-    KV[(Key Vault<br/>(Entra secrets))]
+    KV[(Key Vault Entra Secrets)]
   end
 
-  %% === Observability ===
-  subgraph Observability["Observability"]
+  subgraph Observability
     AppInsights[(Application Insights)]
     LogAnalytics[(Log Analytics Workspace)]
   end
 
-  %% === Flows ===
   User -->|HTTPS| FastAPI
   TeamsDM --> FastAPI
   FastAPI --> Orchestrator
@@ -192,7 +185,6 @@ flowchart LR
   AppInsights --> LogAnalytics
   FastAPI --> TeamsNotify
 
-  %% Identity bindings
   UAMI --> Model
   UAMI --> Cosmos
   UAMI --> KV
