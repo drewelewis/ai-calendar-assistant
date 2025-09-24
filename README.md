@@ -129,6 +129,79 @@ For less than $3 per employee per month, organizations achieve:
 
 **The question isn't whether you can afford this solution—it's whether you can afford not to implement it.**
 
+## 🧱 Cloud & Runtime Architecture (Current State)
+
+High-level deployment view of the currently implemented platform (infrastructure + runtime components). This complements the functional multi-agent diagram below.
+
+```mermaid
+flowchart LR
+  %% === Clients / Entry ===
+  subgraph Clients
+    User[Web / API Client]
+    TeamsDM[Teams Direct Message\n(Outbound Notify)]
+  end
+
+  %% === Application (Azure Container Apps) ===
+  subgraph App["Azure Container App\nFastAPI + Agents"]
+    FastAPI[FastAPI API Layer\n/chat, /agent_chat, /multi_agent_chat, /health]
+    Orchestrator[Agent + MultiAgent\nOrchestrator]
+    LLMAnalytics[LLM Token & Cost\nAnalytics]
+  end
+
+  %% === AI Model Layer ===
+  subgraph OpenAI["Azure OpenAI"]
+    Model[(Model Deployment\n${OPENAI_MODEL_DEPLOYMENT_NAME})]
+  end
+
+  %% === Data & State ===
+  subgraph Data["State & Persistence"]
+    Cosmos[(Cosmos DB\nChatHistory)]
+    Redis[(Azure Redis Cache)]
+  end
+
+  %% === External Integrations ===
+  subgraph Integrations["External Services"]
+    Graph[Microsoft Graph]
+    Maps[Azure Maps]
+    TeamsNotify[Teams Notify Endpoint]
+  end
+
+  %% === Identity & Secrets ===
+  subgraph Identity["Identity & Secrets"]
+    UAMI[(User Assigned Managed Identity)]
+    KV[(Key Vault\n(Entra secrets))]
+  end
+
+  %% === Observability ===
+  subgraph Observability["Observability"]
+    AppInsights[(Application Insights)]
+    LogAnalytics[(Log Analytics Workspace)]
+  end
+
+  %% === Flows ===
+  User -->|HTTPS| FastAPI
+  TeamsDM --> FastAPI
+  FastAPI --> Orchestrator
+  Orchestrator --> Model
+  Orchestrator --> Cosmos
+  Orchestrator --> Redis
+  Orchestrator --> Graph
+  Orchestrator --> Maps
+  FastAPI --> LLMAnalytics --> AppInsights
+  Orchestrator --> AppInsights
+  AppInsights --> LogAnalytics
+  FastAPI --> TeamsNotify
+
+  %% Identity bindings
+  UAMI --> Model
+  UAMI --> Cosmos
+  UAMI --> KV
+  KV --> FastAPI
+  KV --> Orchestrator
+```
+
+**Legend:** FastAPI exposes chat endpoints; Agents orchestrate LLM calls; Cosmos stores chat history; Redis caches lookups; Managed Identity authorizes OpenAI, Cosmos & Key Vault; Application Insights + Log Analytics provide telemetry; outbound Teams notifications are supported.
+
 ## 🏗️ Multi-Agent Architecture
 
 ```mermaid

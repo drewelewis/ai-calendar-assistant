@@ -109,6 +109,7 @@ class MultiAgentOrchestrator:
         self.cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
         self.cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
         self.cosmos_container = os.getenv("COSMOS_CONTAINER", "ChatHistory")
+        self.chat_session_id=os.getenv("CHAT_SESSION_ID")
         
         # Validate required OpenAI environment variables
         if not all([self.endpoint, self.api_key, self.deployment_name]):
@@ -680,12 +681,12 @@ async def main():
     
     try:
         # Create orchestrator
-        orchestrator = MultiAgentOrchestrator(session_id="test-multi-agent-session")
-        
+        orchestrator = MultiAgentOrchestrator(session_id=orchestrator.chat_session_id)
+
         # Example conversations
         test_messages = [
             "Hello! I need help with scheduling a meeting.",
-            "Can you find John Smith in our directory?", 
+            "Can you find Mary Smith in our directory?", 
             "Where are some good coffee shops near our office?",
             "What's my calendar looking like for tomorrow?"
         ]
