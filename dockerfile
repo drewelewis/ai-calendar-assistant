@@ -20,6 +20,7 @@ COPY ./main.py /code/main.py
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt 
 
+COPY ./agents /code/agents
 COPY ./ai /code/ai
 COPY ./api /code/api
 COPY ./identity /code/identity
