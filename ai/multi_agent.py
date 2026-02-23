@@ -2,23 +2,27 @@
 import os
 import asyncio
 import json
-import uuid
 import logging
-from typing import Annotated, Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any
 import datetime
 from dotenv import load_dotenv
 
 from semantic_kernel import Kernel
-from semantic_kernel.agents import ChatCompletionAgent, AgentGroupChat
+from semantic_kernel.agents import ChatCompletionAgent, ChatHistoryAgentThread
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion
-from semantic_kernel.functions import KernelArguments, kernel_function
+from semantic_kernel.functions import KernelArguments
 from semantic_kernel.connectors.ai import FunctionChoiceBehavior
 from semantic_kernel.contents import ChatMessageContent, AuthorRole
+from semantic_kernel.contents.chat_history import ChatHistory
 
 from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
-from plugins.graph_plugin import GraphPlugin
-from plugins.azure_maps_plugin import AzureMapsPlugin
-from plugins.risk_plugin import RiskPlugin
+from agents import (
+    create_calendar_agent,
+    create_directory_agent,
+    create_location_agent,
+    create_risk_agent,
+    create_proxy_agent,
+)
 from prompts.graph_prompts import prompts
 from utils.teams_utilities import TeamsUtilities
 from utils.thread_utilities import ThreadUtilities
@@ -31,67 +35,71 @@ from telemetry.console_output import console_info, console_debug, console_teleme
 
 load_dotenv(override=True)
 
+# ---------------------------------------------------------------------------
+# Routing prompt â€” kept short and deterministic (very low token budget reply)
+# ---------------------------------------------------------------------------
+_ROUTER_SYSTEM = """\
+You are a request router. Given a user message, reply with EXACTLY ONE word â€” \
+the name of the agent best suited to handle it.
+
+Agents and their domains:
+- calendar   : scheduling meetings, calendar events, availability, conference rooms, Teams/Zoom meetings
+- directory  : finding people, user profiles, org chart, departments, managers, direct reports
+- location   : nearby places, restaurants, coffee shops, hotels, POI searches, maps, addresses
+- risk       : client risk profiles, financial exposure, credit risk, portfolio analysis, compliance
+- proxy      : greetings, general questions, clarification, anything else
+
+Reply with only the single word agent name â€” no punctuation, no explanation.\
+"""
+
+
 class MultiAgentOrchestrator:
     """
-    Multi-Agent AI Calendar Assistant Orchestrator
-    
-    This orchestrator manages multiple specialized agents:
-    - Proxy Agent: Main conversation handler and task router
-    - Calendar Agent: Handles calendar operations and scheduling
-    - Directory Agent: Manages user searches and organizational data
-    - Location Agent: Handles location-based searches and mapping
+    Multi-Agent AI Calendar Assistant Orchestrator.
+
+    Uses LLM-based routing: a lightweight router call classifies each incoming
+    message and dispatches it to the appropriate specialist agent.
+
+    Agents:
+    - ProxyAgent    : General conversation and Q&A (no plugins)
+    - CalendarAgent : Calendar/scheduling via Microsoft Graph
+    - DirectoryAgent: People/org search via Microsoft Graph
+    - LocationAgent : POI / nearby search via Azure Maps
+    - RiskAgent     : Client risk analysis via Risk plugin
     """
-    
+
     def __init__(self, session_id: str = None):
-        # Validate session_id is provided
         if not session_id:
-            error_msg = "❌ Session ID is required for MultiAgentOrchestrator initialization"
-            logging.error(error_msg)
-            raise ValueError(error_msg)
-        
+            raise ValueError("session_id is required for MultiAgentOrchestrator")
+
         self.session_id = session_id
-        
-        # Initialize telemetry
+
         self._initialize_telemetry()
-        
-        # Load environment variables
         self._load_environment()
-        
-        # Initialize CosmosDB if available
         self._initialize_cosmos()
-        
-        # Initialize Teams utilities
+
         self.teams_utils = TeamsUtilities()
-        
-        # Initialize Thread utilities for ensuring system/instruction messages
         self.thread_utils = ThreadUtilities()
-        
-        # Create the kernel
+
+        # Shared kernel holds the Azure OpenAI service used by all agents
         self.kernel = Kernel()
-        
-        # Add Azure OpenAI service
         self._setup_openai_service()
-        
-        # Create specialized agents
-        self.agents = self._create_agents()
-        
-        # Create agent group chat
-        self.group_chat = self._create_group_chat()
-        
-        self.logger.info(f"✅ Multi-Agent Orchestrator initialized for session: {self.session_id}")
-    
+
+        # Build all specialist agents (each gets its own kernel + plugins)
+        self.agents: Dict[str, ChatCompletionAgent] = self._build_agents()
+
+        self.logger.info(f"âœ… MultiAgentOrchestrator ready â€” session: {self.session_id}")
+
+    # ------------------------------------------------------------------
+    # Initialisation helpers
+    # ------------------------------------------------------------------
+
     def _initialize_telemetry(self):
-        """Initialize telemetry and logging."""
-        connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
         service_name = os.getenv("TELEMETRY_SERVICE_NAME", "ai-calendar-assistant-multi-agent")
         service_version = os.getenv("TELEMETRY_SERVICE_VERSION", "1.0.0")
-        
-        telemetry_success = initialize_telemetry(
-            service_name=service_name,
-            service_version=service_version
-        )
-        
-        if telemetry_success:
+
+        ok = initialize_telemetry(service_name=service_name, service_version=service_version)
+        if ok:
             self.telemetry = get_telemetry()
             self.metrics = self.telemetry.create_custom_metrics() if self.telemetry else {}
             self.logger = self.telemetry.get_logger() if self.telemetry else logging.getLogger(__name__)
@@ -99,613 +107,309 @@ class MultiAgentOrchestrator:
             self.telemetry = None
             self.metrics = {}
             self.logger = logging.getLogger(__name__)
-    
+
     def _load_environment(self):
-        """Load and validate environment variables."""
         self.endpoint = os.getenv("OPENAI_ENDPOINT")
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.api_version = os.getenv("OPENAI_API_VERSION")
         self.deployment_name = os.getenv("OPENAI_MODEL_DEPLOYMENT_NAME")
         self.cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
-        self.cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
+        self.cosmos_database = os.getenv("COSMOS_DATABASE", "CalendarAssistant")
         self.cosmos_container = os.getenv("COSMOS_CONTAINER", "ChatHistory")
-        self.chat_session_id=os.getenv("CHAT_SESSION_ID")
-        
-        # Validate required OpenAI environment variables
+
         if not all([self.endpoint, self.api_key, self.deployment_name]):
-            error_msg = ("Missing required OpenAI environment variables. Please ensure OPENAI_ENDPOINT, "
-                        "OPENAI_API_KEY, and OPENAI_MODEL_DEPLOYMENT_NAME are set in the .env file.")
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-    
+            raise ValueError(
+                "Missing required env vars: OPENAI_ENDPOINT, OPENAI_API_KEY, "
+                "OPENAI_MODEL_DEPLOYMENT_NAME"
+            )
+
     def _initialize_cosmos(self):
-        """Initialize CosmosDB for chat history persistence."""
         if self.cosmos_endpoint:
             try:
-                with TelemetryContext(operation="cosmosdb_init", cosmos_endpoint=self.cosmos_endpoint):
+                with TelemetryContext(operation="cosmosdb_init"):
                     self.cosmos_manager = CosmosDBChatHistoryManager(
-                        self.cosmos_endpoint, 
-                        self.cosmos_database, 
-                        self.cosmos_container
+                        self.cosmos_endpoint,
+                        self.cosmos_database,
+                        self.cosmos_container,
                     )
-                    self.logger.info("✅ CosmosDB initialized successfully")
+                    self.logger.info("âœ… CosmosDB initialised")
             except Exception as e:
-                self.logger.error(f"⚠ Warning: Failed to initialize CosmosDB: {e}")
+                self.logger.error(f"CosmosDB init failed: {e}")
                 self.cosmos_manager = None
         else:
-            self.logger.info("ℹ COSMOS_ENDPOINT not configured. Chat history will not be persisted.")
+            self.logger.info("COSMOS_ENDPOINT not set â€” chat history disabled")
             self.cosmos_manager = None
-    
+
     def _setup_openai_service(self):
-        """Setup Azure OpenAI service for all agents."""
         self.service_id = "multi-agent-service"
-        
-        with TelemetryContext(operation="openai_service_init", endpoint=self.endpoint):
-            self.kernel.add_service(AzureChatCompletion(
-                deployment_name=self.deployment_name,
-                endpoint=self.endpoint,
-                api_key=self.api_key,
-                api_version=self.api_version or "2023-05-15",
-                service_id=self.service_id
-            ))
-            
-            self.logger.info(f"✅ Azure OpenAI service configured with deployment: {self.deployment_name}")
-        
-        self.settings = self.kernel.get_prompt_execution_settings_from_service_id(service_id=self.service_id)
+
+        self.kernel.add_service(AzureChatCompletion(
+            deployment_name=self.deployment_name,
+            endpoint=self.endpoint,
+            api_key=self.api_key,
+            api_version=self.api_version or "2025-01-01-preview",
+            service_id=self.service_id,
+        ))
+
+        self.settings = self.kernel.get_prompt_execution_settings_from_service_id(self.service_id)
         self.settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
-        
-        # Add parameters to help prevent "invalid content" errors
-        # Note: Newer API versions use max_completion_tokens instead of max_tokens
+
+        is_o1 = "o1" in (self.deployment_name or "").lower()
+        max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "8000"))
+
         try:
-            max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "8000"))
-            if hasattr(self.settings, 'max_completion_tokens'):
-                self.settings.max_completion_tokens = max_tokens
-                self.logger.debug(f"Set max_completion_tokens to {max_tokens}")
-            elif hasattr(self.settings, 'max_tokens'):
-                # Fallback for older API versions that still use max_tokens
-                self.settings.max_tokens = max_tokens
-                self.logger.debug(f"Set max_tokens to {max_tokens} (fallback)")
-                
-            # Check if this is an o1 model to avoid setting unsupported parameters
-            is_o1_model = "o1" in self.deployment_name.lower() if self.deployment_name else False
-            
-            if not is_o1_model:
-                # These parameters are only supported by non-o1 models
-                temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
-                if hasattr(self.settings, 'temperature'):
-                    self.settings.temperature = temperature
-                    self.logger.debug(f"Set temperature to {temperature}")
-                
-                top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
-                if hasattr(self.settings, 'top_p'):
-                    self.settings.top_p = top_p
-                    self.logger.debug(f"Set top_p to {top_p}")
-            else:
-                self.logger.info(f"Detected o1 model '{self.deployment_name}' - skipping temperature and top_p settings (not supported)")
-                
+            for attr in ("max_completion_tokens", "max_tokens"):
+                if hasattr(self.settings, attr):
+                    setattr(self.settings, attr, max_tokens)
+                    break
+            if not is_o1:
+                if hasattr(self.settings, "temperature"):
+                    self.settings.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+                if hasattr(self.settings, "top_p"):
+                    self.settings.top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
         except (ValueError, TypeError) as e:
-            self.logger.warning(f"Error setting OpenAI parameters, using defaults: {e}")
-    
-    def _create_agents(self) -> Dict[str, ChatCompletionAgent]:
-        """Create specialized agents for different tasks."""
-        agents = {}
-        
-        # 1. Proxy Agent - Main conversation handler and task router
-        proxy_instructions = f"""
-You are the Proxy Agent for an AI Calendar Assistant. Your role is to:
+            self.logger.warning(f"Could not set OpenAI params: {e}")
 
-1. **Welcome and Route**: Greet users and understand their needs
-2. **Task Routing**: Determine which specialized agent should handle specific requests
-3. **Conversation Management**: Maintain context and coordinate between agents
-4. **Final Response**: Synthesize responses from specialized agents into coherent answers
+        self.logger.info(f"âœ… Azure OpenAI configured â€” deployment: {self.deployment_name}")
 
-**Routing Guidelines:**
-- Calendar operations (scheduling, events, availability) → @CalendarAgent
-- User searches, directory lookups, organizational data → @DirectoryAgent  
-- Location searches, nearby places, maps → @LocationAgent
-- Client risk analysis, financial exposure, risk metrics → @RiskAgent
-- General conversation, clarification, summary → Handle yourself
+    def _build_agents(self) -> Dict[str, ChatCompletionAgent]:
+        """Instantiate all specialist agents from /agents/."""
+        shared_service = self.kernel.get_service(self.service_id)
 
-**Communication Style:**
-- Professional but friendly tone
-- Clear and concise responses
-- Proactive in asking clarifying questions
-- Acknowledge when routing to other agents
+        agents: Dict[str, ChatCompletionAgent] = {
+            "proxy":     create_proxy_agent(shared_service, self.service_id, self.session_id, self.settings),
+            "calendar":  create_calendar_agent(shared_service, self.service_id, self.session_id, self.settings),
+            "directory": create_directory_agent(shared_service, self.service_id, self.session_id, self.settings),
+            "location":  create_location_agent(shared_service, self.service_id, self.session_id, self.settings),
+            "risk":      create_risk_agent(shared_service, self.service_id, self.session_id, self.settings),
+        }
 
-Session ID: {self.session_id}
-Current Time: {datetime.datetime.now().isoformat()}
-"""
-        
-        agents['proxy'] = ChatCompletionAgent(
-            kernel=self.kernel,
-            name="ProxyAgent",
-            instructions=proxy_instructions,
-            arguments=KernelArguments(settings=self.settings),
-        )
-        
-        # 2. Calendar Agent - Handles calendar and scheduling operations
-        calendar_kernel = Kernel()
-        calendar_kernel.add_service(self.kernel.get_service(self.service_id))
-        calendar_kernel.add_plugin(GraphPlugin(debug=False, session_id=self.session_id), plugin_name="graph")
-        
-        calendar_instructions = f"""
-You are the Calendar Agent, specialized in calendar operations and scheduling. Your expertise includes:
+        # Keep a reference to the maps plugin so we can close its aiohttp session on shutdown
+        try:
+            self._maps_plugin = agents["location"].kernel.plugins["azure_maps"]
+        except Exception:
+            self._maps_plugin = None
 
-**Core Capabilities:**
-- Creating, updating, and managing calendar events
-- Checking availability and scheduling conflicts
-- Finding conference rooms and meeting spaces
-- Managing attendees and meeting invitations
-- Retrieving calendar information for users
-
-**Available Functions:**
-- get_calendar_events: Retrieve calendar events for users
-- create_calendar_event: Schedule new meetings and events
-- get_all_conference_rooms: Find available meeting rooms
-- get_conference_room_events: Check room availability and bookings
-- validate_user_mailbox: Troubleshoot calendar access issues
-
-**Response Style:**
-- Focus on calendar and scheduling solutions
-- Provide clear meeting details and timing
-- Suggest optimal meeting times and locations
-- Handle timezone considerations carefully
-
-Session ID: {self.session_id}
-"""
-        
-        agents['calendar'] = ChatCompletionAgent(
-            kernel=calendar_kernel,
-            name="CalendarAgent", 
-            instructions=calendar_instructions,
-            arguments=KernelArguments(settings=self.settings),
-        )
-        
-        # 3. Directory Agent - Handles user searches and organizational data
-        directory_kernel = Kernel()
-        directory_kernel.add_service(self.kernel.get_service(self.service_id))
-        directory_kernel.add_plugin(GraphPlugin(debug=False, session_id=self.session_id), plugin_name="graph")
-        
-        directory_instructions = f"""
-You are the Directory Agent, specialized in organizational data and user management. Your expertise includes:
-
-**Core Capabilities:**
-- Finding and searching for users in the organization
-- Retrieving user profiles, preferences, and contact information
-- Managing organizational hierarchy and reporting structures
-- Discovering departments and team compositions
-- Handling mailbox and user account information
-
-**Available Functions:**
-- user_search: Find users by various criteria
-- get_user_by_id: Retrieve specific user information
-- get_user_manager: Find reporting relationships
-- get_direct_reports: Get team members and subordinates
-- get_all_users: Organization-wide user queries
-- get_users_by_department: Department-specific user searches
-- get_all_departments: Discover organizational structure
-
-**Response Style:**
-- Provide comprehensive user and organizational information
-- Respect privacy and appropriate information sharing
-- Help with contact discovery and organizational navigation
-- Suggest related searches when helpful
-
-Session ID: {self.session_id}
-"""
-        
-        agents['directory'] = ChatCompletionAgent(
-            kernel=directory_kernel,
-            name="DirectoryAgent",
-            instructions=directory_instructions, 
-            arguments=KernelArguments(settings=self.settings),
-        )
-        
-        # 4. Location Agent - Handles location-based searches
-        location_kernel = Kernel()
-        location_kernel.add_service(self.kernel.get_service(self.service_id))
-        location_kernel.add_plugin(AzureMapsPlugin(debug=False, session_id=self.session_id), plugin_name="azure_maps")
-        
-        location_instructions = f"""
-You are the Location Agent, specialized in location-based searches and mapping. Your expertise includes:
-
-**Core Capabilities:**
-- Finding nearby points of interest (POIs)
-- Searching for specific businesses and locations
-- Category-based location searches (restaurants, gas stations, etc.)
-- Brand-specific searches (Starbucks, McDonald's, etc.)
-- Geographic area searches and mapping assistance
-
-**Available Functions:**
-- search_nearby_locations: General nearby POI searches
-- search_by_category: Category-specific location searches
-- search_by_brand: Brand-specific location searches  
-- search_by_region: Large area geographic searches
-- get_available_categories: Discover available search categories
-
-**Response Style:**
-- Provide specific location details with addresses
-- Include distance and practical travel information
-- Suggest multiple options when available
-- Consider context like meeting locations or office proximity
-
-Session ID: {self.session_id}
-"""
-        
-        agents['location'] = ChatCompletionAgent(
-            kernel=location_kernel,
-            name="LocationAgent",
-            instructions=location_instructions,
-            arguments=KernelArguments(settings=self.settings),
-        )
-        
-        # 5. Risk Agent - Handles client risk management and financial analysis
-        risk_kernel = Kernel()
-        risk_kernel.add_service(self.kernel.get_service(self.service_id))
-        risk_kernel.add_plugin(RiskPlugin(debug=False, session_id=self.session_id), plugin_name="risk")
-        
-        risk_instructions = f"""
-You are the Risk Agent, specialized in client risk management and financial analysis. Your expertise includes:
-
-**Core Capabilities:**
-- Client risk profile analysis and assessment
-- Financial exposure and credit risk evaluation
-- Portfolio risk distribution analysis
-- Client search and identification by name or ID
-- Risk rating categorization and insights
-- Compliance status monitoring
-
-**Available Functions:**
-- get_client_summary_by_id: Comprehensive client risk profiles
-- get_client_risk_metrics: Detailed financial exposure and risk data
-- list_all_clients: Directory of all available clients
-- search_clients_by_name: Find clients by name or partial match
-- get_portfolio_risk_overview: Portfolio-wide risk analysis and distribution
-
-**Response Style:**
-- Provide detailed financial risk analysis with context
-- Explain risk ratings and their implications
-- Offer insights into exposure patterns and trends
-- Suggest risk mitigation strategies when appropriate
-- Present data in clear, actionable formats
-- Highlight critical risk factors and red flags
-
-**Specialized Knowledge:**
-- Understanding of financial instruments and derivatives
-- Knowledge of regional risk factors (US, Europe, etc.)
-- Industry-specific risk patterns (banking, hedge funds, etc.)
-- Credit risk assessment methodologies
-- Portfolio diversification principles
-
-Session ID: {self.session_id}
-"""
-        
-        agents['risk'] = ChatCompletionAgent(
-            kernel=risk_kernel,
-            name="RiskAgent",
-            instructions=risk_instructions,
-            arguments=KernelArguments(settings=self.settings),
-        )
-        
-        self.logger.info(f"✅ Created {len(agents)} specialized agents")
+        self.logger.info(f"✅ {len(agents)} agents ready: {list(agents.keys())}")
         return agents
-    
-    def _create_group_chat(self) -> AgentGroupChat:
-        """Create agent group chat for multi-agent conversations."""
-        # Define agent list for the group chat
-        agent_list = [
-            self.agents['proxy'],
-            self.agents['calendar'], 
-            self.agents['directory'],
-            self.agents['location'],
-            self.agents['risk']
-        ]
-        
-        # Create the group chat without custom selection strategy for now
-        # The default selection strategy will be used
-        group_chat = AgentGroupChat(
-            agents=agent_list
-        )
-        
-        self.logger.info("✅ Agent group chat created")
-        return group_chat
-    
-    async def _agent_selection_strategy(self, agents: List[ChatCompletionAgent], history: List[ChatMessageContent]) -> ChatCompletionAgent:
+
+    # ------------------------------------------------------------------
+    # LLM-based router
+    # ------------------------------------------------------------------
+
+    async def _route_message(self, message: str) -> ChatCompletionAgent:
         """
-        Custom agent selection strategy based on conversation context.
-        
-        Args:
-            agents: List of available agents
-            history: Conversation history
-            
-        Returns:
-            ChatCompletionAgent: Selected agent for the next response
+        Ask the LLM which agent should handle `message`.
+        Returns the selected ChatCompletionAgent (defaults to proxy on any failure).
         """
-        if not history:
-            # Start with proxy agent for new conversations
-            return self.agents['proxy']
-        
-        last_message = history[-1].content.lower() if history else ""
-        
-        # Route based on keywords and context
-        if any(keyword in last_message for keyword in [
-            'calendar', 'meeting', 'schedule', 'appointment', 'event', 
-            'conference room', 'availability', 'book', 'conference'
-        ]):
-            return self.agents['calendar']
-        
-        elif any(keyword in last_message for keyword in [
-            'user', 'find person', 'directory', 'employee', 'manager', 
-            'department', 'team', 'who is', 'contact', 'reports'
-        ]):
-            return self.agents['directory']
-        
-        elif any(keyword in last_message for keyword in [
-            'location', 'nearby', 'restaurant', 'coffee', 'gas station',
-            'map', 'address', 'directions', 'close to', 'near'
-        ]):
-            return self.agents['location']
-        
-        elif any(keyword in last_message for keyword in [
-            'risk', 'client', 'exposure', 'credit risk', 'portfolio', 
-            'financial', 'lcole', 'meridian', 'quantum', 'hedge fund',
-            'investment bank', 'risk rating', 'compliance', 'risk analysis',
-            'risk profile', 'risk metrics', 'commitment', 'derivatives'
-        ]):
-            return self.agents['risk']
-        
-        else:
-            # Default to proxy agent for general conversation
-            return self.agents['proxy']
-    
+        try:
+            service: AzureChatCompletion = self.kernel.get_service(self.service_id)
+
+            # Minimal settings: no tools, tiny token budget, temperature=0
+            router_settings = self.kernel.get_prompt_execution_settings_from_service_id(
+                self.service_id
+            )
+            router_settings.function_choice_behavior = None
+            for attr in ("max_completion_tokens", "max_tokens"):
+                if hasattr(router_settings, attr):
+                    setattr(router_settings, attr, 10)
+                    break
+            is_o1 = "o1" in (self.deployment_name or "").lower()
+            if not is_o1 and hasattr(router_settings, "temperature"):
+                router_settings.temperature = 0.0
+
+            routing_history = ChatHistory()
+            routing_history.add_system_message(_ROUTER_SYSTEM)
+            routing_history.add_user_message(message)
+
+            result = await service.get_chat_message_contents(
+                chat_history=routing_history,
+                settings=router_settings,
+                kernel=self.kernel,
+            )
+
+            agent_name = result[0].content.strip().lower().split()[0]
+            selected = self.agents.get(agent_name)
+
+            if selected:
+                self.logger.info(f"LLM router â†’ {agent_name}")
+                console_debug(f"LLM router selected: {agent_name}", module="Router")
+                return selected
+
+            self.logger.warning(f"Router returned unknown agent '{agent_name}', using proxy")
+            return self.agents["proxy"]
+
+        except Exception as e:
+            self.logger.warning(f"LLM routing failed ({e}), defaulting to proxy")
+            return self.agents["proxy"]
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
     @trace_async_method(operation_name="multi_agent.process_message", include_args=True)
     @measure_performance("multi_agent_request")
     async def process_message(self, message: str) -> str:
-        """
-        Process a user message through the multi-agent system.
-        
-        Args:
-            message: User's input message
-            
-        Returns:
-            str: Response from the appropriate agent(s)
-        """
-        # Record multi-agent request metric
+        """Route a user message to the appropriate specialist agent and return its response."""
+        self.logger.info(f"process_message â€” session: {self.session_id}")
+
         try:
-            if 'chat_requests_total' in self.metrics:
-                self.metrics['chat_requests_total'].add(1, {
-                    "session_id": self.session_id,
-                    "agent_type": "multi_agent"
-                })
-        except Exception as e:
-            self.logger.warning(f"Failed to record multi-agent request metric: {e}")
-        
-        self.logger.info(f"Processing multi-agent request for session: {self.session_id}")
-        
-        # Console telemetry for request
+            if "chat_requests_total" in self.metrics:
+                self.metrics["chat_requests_total"].add(
+                    1, {"session_id": self.session_id, "agent_type": "multi_agent"}
+                )
+        except Exception:
+            pass
+
         try:
-            console_telemetry_event("multi_agent_request", {
-                "session_id": self.session_id,
-                "message_length": len(message),
-                "has_cosmosdb": self.cosmos_manager is not None
-            }, "multi_agent")
-        except Exception as e:
-            self.logger.warning(f"Failed to record console telemetry: {e}")
-        
-        # Create or hydrate thread
+            console_telemetry_event(
+                "multi_agent_request",
+                {"session_id": self.session_id, "message_length": len(message)},
+                "multi_agent",
+            )
+        except Exception:
+            pass
+
+        # --- Hydrate / create thread ---
         with TelemetryContext(operation="thread_creation", session_id=self.session_id):
             if self.cosmos_manager:
-                thread = await self.cosmos_manager.create_hydrated_thread(self.kernel, self.session_id)
+                thread = await self.cosmos_manager.create_hydrated_thread(
+                    self.kernel, self.session_id
+                )
                 self.logger.debug("Thread hydrated from CosmosDB")
             else:
-                # In newer semantic-kernel versions, we'll use AgentGroupChat directly
-                thread = []  # Simple list to store chat history
-                self.logger.debug("Created new empty thread")
-        
-        # Process with agent group chat
-        with TelemetryContext(operation="multi_agent_response", message_length=len(message)):
-            try:
-                # Skip the complex thread type conversion - work with what we have
-                # Just ensure the thread has the basic attributes the AgentGroupChat needs
-                
-                # If we got a list from the fallback case, convert to a proper thread
-                if isinstance(thread, list):
-                    from semantic_kernel.agents import ChatHistoryAgentThread  
-                    new_thread = ChatHistoryAgentThread()
-                    thread = new_thread
-                
-                # AgentGroupChat may expect additional attributes on the thread
-                # Add common attributes that group chats might need
-                if not hasattr(thread, 'name'):
-                    thread.name = f"multi_agent_thread_{self.session_id}"
-                
-                # Add get_channel_keys method if it doesn't exist
-                if not hasattr(thread, 'get_channel_keys'):
-                    def get_channel_keys():
-                        # Return channel keys based on the agents in the group chat
-                        # Each agent can be considered a channel
-                        return [agent.name for agent in self.group_chat.agents]
-                    thread.get_channel_keys = get_channel_keys
-                
-                # Add create_channel method if it doesn't exist
-                if not hasattr(thread, 'create_channel'):
-                    def create_channel(agents=None):
-                        # Create a simple channel representation
-                        # Return a mock channel object or the thread itself
-                        # If no agents provided, use the group chat agents
-                        if agents is None:
-                            agents = self.group_chat.agents
-                        return thread
-                    thread.create_channel = create_channel
-                
-                # Add other potential missing methods
-                if not hasattr(thread, 'channel_id'):
-                    thread.channel_id = self.session_id
+                thread = ChatHistoryAgentThread()
+                self.logger.debug("New empty thread created")
 
-                # Ensure system and instruction messages are present
-                try:
-                    thread = await self.thread_utils.ensure_system_and_instruction_messages(thread, self.session_id, prompts, self.logger)
-                except Exception as e:
-                    self.logger.warning(f"Failed to ensure system/instruction messages on thread: {e}")
-                
-                # Add message to thread - keep it simple
-                # The AgentGroupChat will handle the conversation flow
-                # Just ensure we have a basic message to work with
-                user_message = ChatMessageContent(
-                    role=AuthorRole.USER,
-                    content=message
+        try:
+            thread = await self.thread_utils.ensure_system_and_instruction_messages(
+                thread, self.session_id, prompts, self.logger
+            )
+        except Exception as e:
+            self.logger.warning(f"ensure_system_and_instruction_messages: {e}")
+
+        # --- LLM routing ---
+        with TelemetryContext(operation="llm_routing", message_length=len(message)):
+            selected_agent = await self._route_message(message)
+
+        # --- Dispatch to selected agent ---
+        response_content = ""
+        with TelemetryContext(
+            operation="agent_response",
+            agent_name=selected_agent.name,
+            message_length=len(message),
+        ):
+            try:
+                response = await selected_agent.get_response(
+                    messages=message,
+                    thread=thread,
                 )
-                
-                # Now invoke the group chat - use the correct async generator pattern
-                response_content = ""
-                try:
-                    # NEW APPROACH: Skip AgentGroupChat.invoke() entirely
-                    # Use a simple routing approach instead
-                    
-                    self.logger.debug("Using direct agent routing approach")
-                    
-                    # Create a simple history with just the current message for selection
-                    user_message = ChatMessageContent(
-                        role=AuthorRole.USER,
-                        content=message
-                    )
-                    history = [user_message]
-                    
-                    # Determine which agent should handle this message
-                    selected_agent = await self._agent_selection_strategy(list(self.agents.values()), history)
-                    self.logger.debug(f"Selected agent: {selected_agent.name}")
-                    
-                    # Add the message to the thread if possible
-                    if hasattr(thread, 'add_message'):
-                        thread.add_message(user_message)
-                    
-                    # Use the agent's get_response method instead of calling the chat service directly
-                    # This is the proper way to interact with ChatCompletionAgent
-                    response = await selected_agent.get_response(
-                        messages=message,
-                        thread=thread
-                    )
-                    
-                    # Extract the response content
-                    if hasattr(response, 'value'):
-                        response_content = response.value
-                    elif hasattr(response, 'content'):
-                        response_content = response.content
-                    else:
-                        response_content = str(response)
-                    
-                    # If response_content is a ChatMessageContent object, extract the actual content
-                    if hasattr(response_content, 'content'):
-                        response_content = response_content.content
-                    elif not isinstance(response_content, str):
-                        response_content = str(response_content)
-                    
-                    # Update the thread with the response thread
-                    if hasattr(response, 'thread'):
-                        thread = response.thread
-                    
-                    self.logger.debug(f"Got response: {response_content[:100] if len(response_content) > 100 else response_content}")
-                    
-                except Exception as e:
-                    self.logger.error(f"Error in direct agent processing: {e}")
-                    import traceback
-                    self.logger.error(f"Traceback: {traceback.format_exc()}")
-                    
-                    # Fallback to a simple response
-                    response_content = "I apologize, but I'm having trouble processing your request right now. Please try again or rephrase your question."
-                except Exception as e:
-                    self.logger.error(f"Error with async generator invoke: {e}")
-                    import traceback
-                    self.logger.error(f"Traceback: {traceback.format_exc()}")
-                    response_content = "Error invoking agent group chat."
-                
-                # If no responses were generated, provide a fallback
-                if not response_content:
-                    response_content = "I understand your request, but I'm having trouble generating a response. Please try again or rephrase your question."
-                
-                self.logger.info(f"Generated multi-agent response for session: {self.session_id}")
-                
+
+                # Unwrap the response
+                if hasattr(response, "value"):
+                    response_content = response.value
+                elif hasattr(response, "content"):
+                    response_content = response.content
+                else:
+                    response_content = str(response)
+
+                if hasattr(response_content, "content"):
+                    response_content = response_content.content
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+
+                if hasattr(response, "thread"):
+                    thread = response.thread
+
+                self.logger.info(
+                    f"{selected_agent.name} responded ({len(response_content)} chars)"
+                )
+
             except Exception as e:
-                self.logger.error(f"Error in multi-agent processing: {e}")
-                response_content = "I apologize, but I encountered an error processing your request. Please try again."
-        
-        # Save chat history if CosmosDB is available
+                self.logger.error(f"Agent {selected_agent.name} error: {e}", exc_info=True)
+                response_content = (
+                    "I'm having trouble processing your request right now. "
+                    "Please try again or rephrase your question."
+                )
+
+        if not response_content:
+            response_content = "I wasn't able to generate a response. Please try again."
+
+        # --- Persist chat history ---
         if self.cosmos_manager:
             try:
                 with TelemetryContext(operation="save_chat_history", session_id=self.session_id):
                     await self.cosmos_manager.save_chat_history(thread, self.session_id)
-                    self.logger.info(f"Multi-agent chat history saved with session ID: {self.session_id}")
             except Exception as e:
-                self.logger.error(f"Error saving multi-agent chat history: {e}")
-        
+                self.logger.error(f"Failed to save chat history: {e}")
+
         return response_content
-    
+
+    # ------------------------------------------------------------------
+    # Utility methods
+    # ------------------------------------------------------------------
+
     async def get_agent_status(self) -> Dict[str, Any]:
-        """
-        Get status information about all agents.
-        
-        Returns:
-            dict: Status information for each agent
-        """
-        status = {
+        return {
             "session_id": self.session_id,
             "total_agents": len(self.agents),
-            "agents": {},
+            "agents": {
+                name: {
+                    "name": agent.name,
+                    "available": True,
+                    "instructions_length": (
+                        len(agent.instructions) if hasattr(agent, "instructions") else 0
+                    ),
+                }
+                for name, agent in self.agents.items()
+            },
             "cosmos_available": self.cosmos_manager is not None,
-            "telemetry_enabled": self.telemetry is not None
+            "telemetry_enabled": self.telemetry is not None,
         }
-        
-        for name, agent in self.agents.items():
-            status["agents"][name] = {
-                "name": agent.name,
-                "available": True,
-                "instructions_length": len(agent.instructions) if hasattr(agent, 'instructions') else 0
-            }
-        
-        return status
-    
+
+    async def close(self):
+        """Release aiohttp sessions and other async resources."""
+        if self._maps_plugin:
+            try:
+                await self._maps_plugin._cleanup()
+            except Exception:
+                pass
+
     async def reset_conversation(self):
-        """Reset the conversation history for a fresh start."""
         if self.cosmos_manager:
             try:
-                # Clear conversation history in CosmosDB
                 await self.cosmos_manager.clear_conversation_history(self.session_id)
-                self.logger.info(f"Conversation history cleared for session: {self.session_id}")
+                self.logger.info(f"Conversation reset for session: {self.session_id}")
             except Exception as e:
-                self.logger.error(f"Error clearing conversation history: {e}")
+                self.logger.error(f"reset_conversation error: {e}")
 
-# Example usage and testing
+
+# ---------------------------------------------------------------------------
+# Local smoke-test
+# ---------------------------------------------------------------------------
 async def main():
-    """Example usage of Multi-Agent Orchestrator."""
-    console_info("🚀 Starting Multi-Agent AI Calendar Assistant", "MultiAgent")
-    
-    try:
-        # Create orchestrator
-        orchestrator = MultiAgentOrchestrator(session_id=orchestrator.chat_session_id)
+    session_id = os.getenv("CHAT_SESSION_ID", "test-session-001")
+    console_info("ðŸš€ Starting Multi-Agent Orchestrator smoke test", "MultiAgent")
 
-        # Example conversations
-        test_messages = [
-            "Hello! I need help with scheduling a meeting.",
-            "Can you find Mary Smith in our directory?", 
-            "Where are some good coffee shops near our office?",
-            "What's my calendar looking like for tomorrow?"
-        ]
-        
-        for i, message in enumerate(test_messages, 1):
-            console_info(f"\n=== Example {i}: {message} ===", "MultiAgent")
-            
-            response = await orchestrator.process_message(message)
-            console_info(f"Response: {response[:200]}{'...' if len(response) > 200 else ''}", "MultiAgent")
-        
-        # Get agent status
-        status = await orchestrator.get_agent_status()
-        console_info(f"\nAgent Status: {json.dumps(status, indent=2)}", "MultiAgent")
-        
-    except Exception as e:
-        console_info(f"Multi-agent test failed: {e}", "MultiAgent")
-        raise
+    orchestrator = MultiAgentOrchestrator(session_id=session_id)
+
+    test_messages = [
+        "Hello! What can you help me with?",
+        "Find coffee shops near Times Square",
+        "Who is the manager of the engineering department?",
+        "What's my calendar looking like for tomorrow?",
+        "Show me the risk profile for Meridian Capital",
+    ]
+
+    for i, msg in enumerate(test_messages, 1):
+        console_info(f"\n=== Test {i}: {msg} ===", "MultiAgent")
+        response = await orchestrator.process_message(msg)
+        preview = response[:300] + ("..." if len(response) > 300 else "")
+        console_info(f"Response: {preview}", "MultiAgent")
+
+    status = await orchestrator.get_agent_status()
+    console_info(f"\nAgent Status:\n{json.dumps(status, indent=2)}", "MultiAgent")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
-    

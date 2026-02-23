@@ -195,10 +195,11 @@ class AzureMapsPlugin:
                         if isinstance(cat, dict) and 'id' in cat:
                             # Map common category IDs to names
                             category_map = {
-                                7315: "Restaurant", 9361: "Gas Station", 7313: "Hotel",
+                                7315: "Restaurant", 7311: "Gas Station", 7314: "Hotel",
                                 9663: "Hospital", 9927: "Pharmacy", 9362: "Shopping",
                                 7372: "ATM", 9352: "School", 7832: "Airport", 7380: "Bank",
-                                9919: "Coffee Shop", 9910: "Tourist Attraction"
+                                9375002: "Coffee Shop", 9361007: "Cafe",
+                                9376003: "Bar", 7332: "Supermarket", 9910: "Tourist Attraction"
                             }
                             cat_name = category_map.get(cat['id'], f"Category {cat['id']}")
                             category_names.append(cat_name)
@@ -256,16 +257,23 @@ class AzureMapsPlugin:
         
         SUPPORTED CATEGORIES:
         - restaurant: Restaurants and dining establishments
+        - fast_food: Fast food restaurants
         - gas_station: Fuel stations and gas pumps
         - hotel: Hotels and accommodations
         - hospital: Medical facilities and hospitals
         - pharmacy: Pharmacies and drug stores
         - shopping: Shopping centers and retail stores
+        - shopping_center: Malls and shopping centers
         - atm: Automated Teller Machines
+        - bank: Banking institutions
         - school: Educational institutions
         - airport: Airports and aviation facilities
-        - bank: Banking institutions
         - coffee_shop: Coffee shops and cafes
+        - cafe: Cafes and coffee houses
+        - bar: Bars and pubs
+        - supermarket: Grocery stores and supermarkets
+        - gym: Gyms and fitness centers
+        - parking: Parking lots and garages
         - tourist_attraction: Points of interest for tourists
         
         FILTERING ADVANTAGES:
@@ -295,22 +303,30 @@ class AzureMapsPlugin:
             # Notify user we're searching by category
             self._send_friendly_notification(f"🏷️ Searching for {categories} near your location...")
             
-            # Map category names to Azure Maps category IDs
+            # Map category names to Azure Maps category IDs (lists support multiple IDs per category)
+            # Reference: https://docs.microsoft.com/en-us/rest/api/maps/search/get-search-nearby
             category_mapping = {
-                'restaurant': 7315,
-                'italian_restaurant': 7315025,
-                'french_restaurant': 7315017,
-                'gas_station': 9361,
-                'hotel': 7313,
-                'hospital': 9663,
-                'pharmacy': 9927,
-                'shopping': 9362,
-                'atm': 7372,
-                'school': 9352,
-                'airport': 7832,
-                'bank': 7380,
-                'coffee_shop': 9919,
-                'tourist_attraction': 9910
+                'restaurant': [7315],
+                'italian_restaurant': [7315025],
+                'french_restaurant': [7315017],
+                'fast_food': [7315036],
+                'gas_station': [7311],
+                'hotel': [7314],
+                'hospital': [9663],
+                'pharmacy': [9927],
+                'shopping': [9362],
+                'shopping_center': [9362],
+                'atm': [7372],
+                'school': [9352],
+                'airport': [7832],
+                'bank': [7380],
+                'coffee_shop': [9375002, 9361007],   # Coffee Shop / Café-Coffee House
+                'cafe': [9361007, 9375002],
+                'bar': [9376003],
+                'supermarket': [7332],
+                'gym': [9715],
+                'parking': [7383],
+                'tourist_attraction': [9910]
             }
             
             # Parse and validate categories
@@ -320,7 +336,7 @@ class AzureMapsPlugin:
             
             for category in category_list:
                 if category in category_mapping:
-                    category_ids.append(category_mapping[category])
+                    category_ids.extend(category_mapping[category])  # extend supports multi-ID lists
                 else:
                     invalid_categories.append(category)
             
@@ -370,7 +386,8 @@ class AzureMapsPlugin:
                 poi_category = "Business"
                 if poi_categories and isinstance(poi_categories[0], dict):
                     cat_id = poi_categories[0].get('id')
-                    reverse_mapping = {v: k.replace('_', ' ').title() for k, v in category_mapping.items()}
+                    reverse_mapping = {cid: k.replace('_', ' ').title()
+                                       for k, ids in category_mapping.items() for cid in ids}
                     poi_category = reverse_mapping.get(cat_id, "Business")
                 
                 response_lines.append(
@@ -764,10 +781,11 @@ class AzureMapsPlugin:
                 if categories and isinstance(categories[0], dict):
                     cat_id = categories[0].get('id')
                     category_mapping = {
-                        7315: "Restaurant", 9361: "Gas Station", 7313: "Hotel",
+                        7315: "Restaurant", 7311: "Gas Station", 7314: "Hotel",
                         9663: "Hospital", 9927: "Pharmacy", 9362: "Shopping",
                         7372: "ATM", 9352: "School", 7832: "Airport", 7380: "Bank",
-                        9919: "Coffee Shop", 9910: "Tourist Attraction"
+                        9375002: "Coffee Shop", 9361007: "Cafe",
+                        9376003: "Bar", 7332: "Supermarket", 9910: "Tourist Attraction"
                     }
                     category_name = category_mapping.get(cat_id, "Business")
                 

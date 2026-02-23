@@ -58,6 +58,14 @@ class TeamsUtilities:
             session_id: The user's session ID
             debug: Whether to enable debug logging
         """
+        # Respect the kill-switch for test runs
+        if os.getenv("DISABLE_TEAMS_NOTIFICATIONS", "false").lower() == "true":
+            return
+
+        # Respect the kill-switch for test runs
+        if os.getenv("DISABLE_TEAMS_NOTIFICATIONS", "false").lower() == "true":
+            return
+
         if session_id:
             try:
                 # Import telemetry components here to avoid circular imports
