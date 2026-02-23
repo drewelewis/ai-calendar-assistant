@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional, Any
 import asyncio
 
@@ -9,35 +10,6 @@ TELEMETRY_EXPLICITLY_DISABLED = os.environ.get('TELEMETRY_EXPLICITLY_DISABLED', 
 
 if TELEMETRY_EXPLICITLY_DISABLED:
     print("🚫 Telemetry explicitly disabled via environment variable")
-
-# Redis Cache Support - Using redis package with asyncio for Python 3.13 compatibility
-REDIS_AVAILABLE = False
-redis_client_class = None
-
-try:
-    # Use redis package instead of aioredis for Python 3.13 compatibility
-    import redis.asyncio as redis_async
-    redis_client_class = redis_async.Redis
-    REDIS_AVAILABLE = True
-    print("✅ Redis support enabled (redis.asyncio)")
-except ImportError as e:
-    try:
-        # Fallback: try aioredis if redis.asyncio not available
-        import aioredis
-        redis_client_class = aioredis
-        REDIS_AVAILABLE = True
-        print("✅ Redis support enabled (aioredis fallback)")
-    except Exception as aioredis_error:
-        print(f"⚠️  Redis not available - caching disabled")
-        print(f"     redis.asyncio error: {e}")
-        print(f"     aioredis error: {aioredis_error}")
-        REDIS_AVAILABLE = False
-        redis_client_class = None
-except Exception as e:
-    print(f"⚠️  Redis import error - caching disabled: {e}")
-    print(f"     Error type: {type(e).__name__}")
-    REDIS_AVAILABLE = False
-    redis_client_class = None
 
 # Load environment variables from .env file
 try:
@@ -194,157 +166,34 @@ class RiskOperations:
         This class provides methods to interact with risk management data via mocked API.
         """
         
-        # Redis Cache Configuration
-        self.cache_enabled = REDIS_AVAILABLE and os.environ.get('REDIS_CACHE_ENABLED', 'true').lower() in ('true', '1', 'yes')
-        self.redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-        self.cache_ttl = int(os.environ.get('RISK_CACHE_TTL_SECONDS', '300'))  # 5 minutes default
-        self.redis_client = None
+        # Load client data from CSV at startup - held in memory for fast lookups
+        self._mock_client_data = self._load_client_data()
         
-        # Cache configuration for different types of risk data
-        self.cache_ttl_config = {
-            'client_summary': int(os.environ.get('CACHE_TTL_CLIENT_SUMMARY', '600')),  # 10 minutes
-            'risk_metrics': int(os.environ.get('CACHE_TTL_RISK_METRICS', '300')),  # 5 minutes
-            'exposure_data': int(os.environ.get('CACHE_TTL_EXPOSURE', '180'))  # 3 minutes
-        }
-        
-        # Mock data store - in a real implementation, this would connect to actual risk management systems
-        self._mock_client_data = {
-            "5008373037": {
-                "client_id": "5008373037",
-                "client_name": "LCOLE",
-                "parent_client_relationship": {
-                    "name": "JAMES FINANCIAL",
-                    "id": "7000380807"
-                },
-                "country": "US",
-                "industry_fund_type": "Open ended funds",
-                "region": "NORTH AMERICA",
-                "exposure_type": "Global Rates Up",
-                "exposure_amounts": [38633400, 2147195, 172363],
-                "adjustments_changes": -1847.97,
-                "large_commitment_amount": 500000000,
-                "additional_credit_risk_metrics": [4385955.42, 142181.36, 1140581.76],
-                "description": "This client, LCOLE, operates under the parent JAMES FINANCIAL and is part of the open-ended funds sector in North America. The profile reflects significant financial exposures, including a large commitment amount and metrics relevant for credit risk assessment.",
-                "last_updated": datetime.now().isoformat(),
-                "risk_rating": "Medium-High",
-                "compliance_status": "Active"
-            },
-            "8009547821": {
-                "client_id": "8009547821",
-                "client_name": "MERIDIAN CAPITAL INVESTMENTS",
-                "parent_client_relationship": {
-                    "name": "MERIDIAN HOLDINGS GROUP",
-                    "id": "8000123456"
-                },
-                "country": "GB",
-                "industry_fund_type": "Investment Banking",
-                "region": "EUROPE",
-                "exposure_type": "Fixed Income Derivatives",
-                "exposure_amounts": [125750000, 67890123, 8947562],
-                "adjustments_changes": 15432.88,
-                "large_commitment_amount": 1250000000,
-                "additional_credit_risk_metrics": [18750423.67, 892341.55, 3456789.12],
-                "description": "MERIDIAN CAPITAL INVESTMENTS is a leading European investment bank specializing in fixed income derivatives and structured products. Operating under MERIDIAN HOLDINGS GROUP, they maintain substantial exposure to European sovereign debt markets and provide prime brokerage services to institutional clients across the EU.",
-                "last_updated": datetime.now().isoformat(),
-                "risk_rating": "High",
-                "compliance_status": "Active"
-            },
-            "6007892341": {
-                "client_id": "6007892341",
-                "client_name": "QUANTUM HEDGE STRATEGIES",
-                "parent_client_relationship": {
-                    "name": "QUANTUM FINANCIAL GROUP",
-                    "id": "6000567890"
-                },
-                "country": "US",
-                "industry_fund_type": "Hedge Fund - Quantitative",
-                "region": "NORTH AMERICA",
-                "exposure_type": "Equity Long/Short",
-                "exposure_amounts": [89456700, 23847291, 5672834],
-                "adjustments_changes": -7234.56,
-                "large_commitment_amount": 750000000,
-                "additional_credit_risk_metrics": [12847592.33, 567823.91, 2890456.78],
-                "description": "QUANTUM HEDGE STRATEGIES is a sophisticated quantitative hedge fund under QUANTUM FINANCIAL GROUP, employing algorithmic trading strategies across global equity markets. The fund specializes in market-neutral strategies with significant exposure to technology and financial sector equities, utilizing advanced machine learning models for alpha generation.",
-                "last_updated": datetime.now().isoformat(),
-                "risk_rating": "Medium",
-                "compliance_status": "Active"
-            }
-        }
-        
-        console_info(f"Risk Operations initialized (telemetry: {'enabled' if TELEMETRY_AVAILABLE else 'disabled'}, cache: {'enabled' if self.cache_enabled else 'disabled'})", "RiskOps")
-        
-        # Log Redis status to telemetry
-        console_telemetry_event("redis_status_initialized", {
-            "redis_available": REDIS_AVAILABLE,
-            "cache_enabled": self.cache_enabled,
-            "redis_url": self.redis_url if self.cache_enabled else None,
-            "cache_ttl_default": self.cache_ttl
-        }, "RiskOps")
+        console_info(f"Risk Operations initialized with {len(self._mock_client_data)} clients (telemetry: {'enabled' if TELEMETRY_AVAILABLE else 'disabled'})", "RiskOps")
 
-    async def _get_redis_client(self):
+    def _load_client_data(self) -> Dict[str, Any]:
         """
-        Get or create Redis client with proper error handling.
+        Load client risk data from JSON file into memory at startup.
+        Falls back to empty dict if file is missing or unreadable.
         """
-        if not self.cache_enabled or not redis_client_class:
-            return None
-            
-        if self.redis_client is None:
-            try:
-                if hasattr(redis_client_class, 'from_url'):
-                    # For redis.asyncio.Redis
-                    self.redis_client = redis_client_class.from_url(self.redis_url, decode_responses=True)
-                else:
-                    # For aioredis fallback
-                    self.redis_client = await redis_client_class.from_url(self.redis_url)
-                
-                # Test connection
-                await self.redis_client.ping()
-                console_info("Redis connection established successfully", "RiskOps")
-                
-            except Exception as e:
-                console_warning(f"Redis connection failed: {e}", "RiskOps")
-                self.cache_enabled = False
-                self.redis_client = None
-                
-        return self.redis_client
+        json_path = Path(__file__).parent / "risk_data.json"
 
-    async def _get_from_cache(self, key: str) -> Optional[str]:
-        """
-        Get data from Redis cache.
-        """
-        if not self.cache_enabled:
-            return None
-            
+        if not json_path.exists():
+            console_warning(f"Risk data file not found: {json_path}", "RiskOps")
+            return {}
+
         try:
-            redis_client = await self._get_redis_client()
-            if redis_client:
-                return await redis_client.get(key)
+            with open(json_path, encoding="utf-8-sig") as f:
+                data: Dict[str, Any] = json.load(f)
+            # Stamp last_updated at load time
+            loaded_at = datetime.now().isoformat()
+            for record in data.values():
+                record["last_updated"] = loaded_at
+            console_info(f"Loaded {len(data)} client records from {json_path.name}", "RiskOps")
+            return data
         except Exception as e:
-            console_warning(f"Cache get error for key {key}: {e}", "RiskOps")
-            
-        return None
-
-    async def _set_cache(self, key: str, value: str, ttl: int = None) -> None:
-        """
-        Set data in Redis cache.
-        """
-        if not self.cache_enabled:
-            return
-            
-        try:
-            redis_client = await self._get_redis_client()
-            if redis_client:
-                ttl = ttl or self.cache_ttl
-                await redis_client.setex(key, ttl, value)
-        except Exception as e:
-            console_warning(f"Cache set error for key {key}: {e}", "RiskOps")
-
-    def _generate_cache_key(self, prefix: str, *args) -> str:
-        """
-        Generate a consistent cache key.
-        """
-        key_parts = [prefix] + [str(arg) for arg in args]
-        return ":".join(key_parts)
+            console_error(f"Failed to load risk data JSON: {e}", "RiskOps")
+            return {}
 
     @trace_async_method("get_client_summary_by_id", include_args=True)
     @measure_performance("risk_client_summary_lookup")
@@ -361,18 +210,6 @@ class RiskOperations:
         try:
             console_info(f"Looking up client summary for ID: {client_id}", "RiskOps")
             
-            # Check cache first
-            cache_key = self._generate_cache_key("client_summary", client_id)
-            cached_result = await self._get_from_cache(cache_key)
-            
-            if cached_result:
-                console_debug(f"Cache hit for client summary: {client_id}", "RiskOps")
-                console_telemetry_event("cache_hit", {
-                    "operation": "get_client_summary_by_id",
-                    "client_id": client_id
-                }, "RiskOps")
-                return json.loads(cached_result)
-            
             # Simulate API call delay (remove in real implementation)
             await asyncio.sleep(0.1)
             
@@ -381,13 +218,6 @@ class RiskOperations:
                 client_data = self._mock_client_data[client_id].copy()
                 
                 console_info(f"Client summary found for {client_id}: {client_data['client_name']}", "RiskOps")
-                
-                # Cache the result
-                await self._set_cache(
-                    cache_key, 
-                    json.dumps(client_data), 
-                    self.cache_ttl_config['client_summary']
-                )
                 
                 console_telemetry_event("client_summary_retrieved", {
                     "client_id": client_id,
@@ -428,14 +258,6 @@ class RiskOperations:
         try:
             console_info(f"Looking up risk metrics for client ID: {client_id}", "RiskOps")
             
-            # Check cache first
-            cache_key = self._generate_cache_key("risk_metrics", client_id)
-            cached_result = await self._get_from_cache(cache_key)
-            
-            if cached_result:
-                console_debug(f"Cache hit for risk metrics: {client_id}", "RiskOps")
-                return json.loads(cached_result)
-            
             # Simulate API call delay
             await asyncio.sleep(0.1)
             
@@ -455,13 +277,6 @@ class RiskOperations:
                 }
                 
                 console_info(f"Risk metrics found for {client_id}", "RiskOps")
-                
-                # Cache the result
-                await self._set_cache(
-                    cache_key, 
-                    json.dumps(risk_metrics), 
-                    self.cache_ttl_config['risk_metrics']
-                )
                 
                 return risk_metrics
             else:
@@ -532,10 +347,5 @@ class RiskOperations:
         """
         Clean up resources.
         """
-        if self.redis_client:
-            try:
-                await self.redis_client.close()
-                console_info("Redis connection closed", "RiskOps")
-            except Exception as e:
-                console_warning(f"Error closing Redis connection: {e}", "RiskOps")
+        pass  # No persistent connections to close
 

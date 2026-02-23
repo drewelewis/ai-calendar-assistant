@@ -9,7 +9,6 @@ if TELEMETRY_EXPLICITLY_DISABLED:
 from datetime import datetime
 import traceback
 import asyncio
-import hashlib
 import json
 import logging
 from typing import List, Dict, Optional, Any
@@ -29,35 +28,6 @@ from msgraph.generated.models.attendee import Attendee
 from msgraph.generated.models.email_address import EmailAddress
 from msgraph.generated.models.online_meeting import OnlineMeeting
 from msgraph.generated.models.chat_info import ChatInfo
-
-# Redis Cache Support - Using redis package with asyncio for Python 3.13 compatibility
-REDIS_AVAILABLE = False
-redis_client_class = None
-
-try:
-    # Use redis package instead of aioredis for Python 3.13 compatibility
-    import redis.asyncio as redis_async
-    redis_client_class = redis_async.Redis
-    REDIS_AVAILABLE = True
-    print("✅ Redis support enabled (redis.asyncio)")
-except ImportError as e:
-    try:
-        # Fallback: try aioredis if redis.asyncio not available
-        import aioredis
-        redis_client_class = aioredis
-        REDIS_AVAILABLE = True
-        print("✅ Redis support enabled (aioredis fallback)")
-    except Exception as aioredis_error:
-        print(f"⚠️  Redis not available - caching disabled")
-        print(f"     redis.asyncio error: {e}")
-        print(f"     aioredis error: {aioredis_error}")
-        REDIS_AVAILABLE = False
-        redis_client_class = None
-except Exception as e:
-    print(f"⚠️  Redis import error - caching disabled: {e}")
-    print(f"     Error type: {type(e).__name__}")
-    REDIS_AVAILABLE = False
-    redis_client_class = None
 
 # Load environment variables from .env file
 try:
@@ -277,31 +247,7 @@ class GraphOperations:
 
         self.graph_client = None  # Lazy initialization
         
-        # Redis Cache Configuration
-        self.cache_enabled = REDIS_AVAILABLE and os.environ.get('REDIS_CACHE_ENABLED', 'true').lower() in ('true', '1', 'yes')
-        self.redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-        self.cache_ttl = int(os.environ.get('GRAPH_CACHE_TTL_SECONDS', '300'))  # 5 minutes default
-        self.redis_client = None
-        
-        # Cache configuration for different types of data
-        self.cache_ttl_config = {
-            'user_info': int(os.environ.get('CACHE_TTL_USER_INFO', '600')),  # 10 minutes
-            'departments': int(os.environ.get('CACHE_TTL_DEPARTMENTS', '3600')),  # 1 hour  
-            'conference_rooms': int(os.environ.get('CACHE_TTL_ROOMS', '1800')),  # 30 minutes
-            'calendar_events': int(os.environ.get('CACHE_TTL_CALENDAR', '180')),  # 3 minutes
-            'mailbox_validation': int(os.environ.get('CACHE_TTL_MAILBOX', '1800')),  # 30 minutes
-            'search_results': int(os.environ.get('CACHE_TTL_SEARCH', '300'))  # 5 minutes
-        }
-        
-        console_info(f"Graph Operations initialized (telemetry: {'enabled' if TELEMETRY_AVAILABLE else 'disabled'}, cache: {'enabled' if self.cache_enabled else 'disabled'})", "GraphOps")
-        
-        # Log Redis status to telemetry
-        console_telemetry_event("redis_status_initialized", {
-            "redis_available": REDIS_AVAILABLE,
-            "cache_enabled": self.cache_enabled,
-            "redis_url": self.redis_url if self.cache_enabled else None,
-            "cache_ttl_default": self.cache_ttl
-        }, "GraphOps")
+        console_info(f"Graph Operations initialized (telemetry: {'enabled' if TELEMETRY_AVAILABLE else 'disabled'})", "GraphOps")
 
     def _format_event_id(self, event_id: str, max_length: int = 40) -> str:
         """
@@ -345,444 +291,6 @@ class GraphOperations:
             # Handle object format (direct from API)
             return getattr(user, attribute_name, default_value)
 
-    @trace_async_method("redis_connect")
-    async def _get_redis_client(self):
-        """Get or create Redis client with connection pooling, error handling, and telemetry."""
-        if not self.cache_enabled:
-            return None
-            
-        if self.redis_client is None:
-            start_time = time.time()
-            try:
-                console_info("🔄 Establishing Redis connection...", "GraphOps")
-                console_telemetry_event("redis_connection_attempt", {
-                    "redis_url": self.redis_url,
-                    "cache_enabled": self.cache_enabled
-                }, "GraphOps")
-                
-                # Use redis_client_class (either redis.asyncio.Redis or aioredis)
-                if hasattr(redis_client_class, 'from_url'):
-                    # redis.asyncio.Redis or aioredis
-                    self.redis_client = redis_client_class.from_url(
-                        self.redis_url,
-                        encoding="utf-8",
-                        decode_responses=True,
-                        socket_connect_timeout=5,
-                        socket_timeout=5,
-                        retry_on_timeout=True
-                    )
-                else:
-                    # Fallback approach
-                    self.redis_client = redis_client_class(
-                        url=self.redis_url,
-                        encoding="utf-8",
-                        decode_responses=True
-                    )
-                
-                # Test connection
-                await self.redis_client.ping()
-                connection_time = time.time() - start_time
-                console_info(f"✅ Redis cache connected successfully in {connection_time:.3f}s", "GraphOps")
-                console_telemetry_event("redis_connection_success", {
-                    "connection_time_ms": round(connection_time * 1000, 2),
-                    "redis_url": self.redis_url
-                }, "GraphOps")
-                
-            except Exception as e:
-                connection_time = time.time() - start_time
-                console_warning(f"🚨 Redis connection failed after {connection_time:.3f}s: {e} - Caching disabled", "GraphOps")
-                console_telemetry_event("redis_connection_failed", {
-                    "connection_time_ms": round(connection_time * 1000, 2),
-                    "error": str(e),
-                    "redis_url": self.redis_url
-                }, "GraphOps")
-                self.cache_enabled = False
-                self.redis_client = None
-        return self.redis_client
-
-    def _generate_cache_key(self, method_name: str, *args, **kwargs) -> str:
-        """Generate a consistent cache key for method calls."""
-        # Create a deterministic hash of the method name and parameters
-        key_parts = [method_name]
-        
-        # Special handling for methods that need parameter normalization for consistent caching
-        if method_name in ["get_all_users", "get_users_by_department", "search_users"]:
-            # These methods have max_results and exclude_inactive_mailboxes parameters
-            # Always normalize max_results to 100 for consistent caching
-            normalized_args = list(args)
-            if len(normalized_args) > 0:
-                # For get_all_users: args[0] = max_results
-                # For get_users_by_department: args[0] = department, args[1] = max_results  
-                # For search_users: args[0] = filter, args[1] = max_results
-                if method_name == "get_all_users":
-                    normalized_args[0] = 100  # max_results
-                elif method_name == "get_users_by_department" and len(normalized_args) > 1:
-                    normalized_args[1] = 100  # max_results (department stays as-is)
-                elif method_name == "search_users" and len(normalized_args) > 1:
-                    normalized_args[1] = 100  # max_results (filter stays as-is)
-            
-            # Add normalized positional arguments
-            for arg in normalized_args:
-                if isinstance(arg, (str, int, float, bool)):
-                    key_parts.append(str(arg))
-                elif isinstance(arg, datetime):
-                    key_parts.append(arg.isoformat())
-                else:
-                    key_parts.append(str(hash(str(arg))))
-                    
-        elif method_name in ["get_all_conference_rooms", "get_all_departments"]:
-            # These methods only have max_results parameter
-            # Always normalize max_results to 100 for consistent caching
-            normalized_args = list(args)
-            if len(normalized_args) > 0:
-                normalized_args[0] = 100  # max_results
-            
-            # Add normalized positional arguments
-            for arg in normalized_args:
-                if isinstance(arg, (str, int, float, bool)):
-                    key_parts.append(str(arg))
-                elif isinstance(arg, datetime):
-                    key_parts.append(arg.isoformat())
-                else:
-                    key_parts.append(str(hash(str(arg))))
-        else:
-            # Add positional arguments normally for other methods
-            for arg in args:
-                if isinstance(arg, (str, int, float, bool)):
-                    key_parts.append(str(arg))
-                elif isinstance(arg, datetime):
-                    key_parts.append(arg.isoformat())
-                else:
-                    key_parts.append(str(hash(str(arg))))
-        
-        # Add keyword arguments in sorted order for consistency
-        for k, v in sorted(kwargs.items()):
-            if isinstance(v, (str, int, float, bool)):
-                key_parts.append(f"{k}:{v}")
-            elif isinstance(v, datetime):
-                key_parts.append(f"{k}:{v.isoformat()}")
-            else:
-                key_parts.append(f"{k}:{hash(str(v))}")
-        
-        # Create hash to keep key length manageable
-        key_string = "|".join(key_parts)
-        key_hash = hashlib.md5(key_string.encode()).hexdigest()
-        return f"graph:{method_name}:{key_hash}"
-
-    @trace_async_method("cache_get")
-    async def _get_from_cache(self, cache_key: str) -> Optional[Any]:
-        """Retrieve data from Redis cache with error handling and telemetry."""
-        if not self.cache_enabled:
-            console_debug("Cache disabled - skipping retrieval", "GraphOps")
-            return None
-            
-        start_time = time.time()
-        try:
-            redis_client = await self._get_redis_client()
-            if redis_client is None:
-                console_warning("Redis client unavailable - cache retrieval failed", "GraphOps")
-                return None
-                
-            cached_data = await redis_client.get(cache_key)
-            retrieval_time = time.time() - start_time
-            
-            if cached_data:
-                data_size = len(cached_data)
-                console_debug(f"🎯 Cache HIT for key: {cache_key[:50]}... (size: {data_size} bytes, time: {retrieval_time:.3f}s)", "GraphOps")
-                console_info(f"📋 Cache hit - {cache_key.split(':')[1]} retrieved in {retrieval_time:.3f}s", "GraphOps")
-                
-                # Deserialize and reconstruct proper object types
-                raw_data = json.loads(cached_data)
-                reconstructed_data = self._reconstruct_from_cache(raw_data)
-                return reconstructed_data
-            else:
-                console_debug(f"❌ Cache MISS for key: {cache_key[:50]}... (time: {retrieval_time:.3f}s)", "GraphOps")
-                console_info(f"🔍 Cache miss - {cache_key.split(':')[1]} not found (checked in {retrieval_time:.3f}s)", "GraphOps")
-                return None
-        except Exception as e:
-            retrieval_time = time.time() - start_time
-            console_warning(f"🚨 Cache retrieval error after {retrieval_time:.3f}s: {e}", "GraphOps")
-            return None
-
-    @trace_async_method("cache_set")
-    async def _set_cache(self, cache_key: str, data: Any, ttl: int) -> None:
-        """Store data in Redis cache with TTL, error handling, and telemetry."""
-        if not self.cache_enabled:
-            console_debug("Cache disabled - skipping storage", "GraphOps")
-            return
-            
-        start_time = time.time()
-        try:
-            redis_client = await self._get_redis_client()
-            if redis_client is None:
-                console_warning("Redis client unavailable - cache storage failed", "GraphOps")
-                return
-                
-            # Convert complex objects to JSON-serializable format
-            serializable_data = self._make_serializable(data)
-            json_data = json.dumps(serializable_data, default=str)
-            data_size = len(json_data)
-            
-            await redis_client.setex(cache_key, ttl, json_data)
-            storage_time = time.time() - start_time
-            
-            # Determine cache type for better logging
-            cache_type = cache_key.split(':')[1] if ':' in cache_key else 'unknown'
-            
-            console_debug(f"💾 Cache SET for key: {cache_key[:50]}... (size: {data_size} bytes, TTL: {ttl}s, time: {storage_time:.3f}s)", "GraphOps")
-            console_info(f"🗂️  Cached {cache_type} data ({data_size} bytes) with {ttl}s TTL in {storage_time:.3f}s", "GraphOps")
-            
-        except Exception as e:
-            storage_time = time.time() - start_time
-            console_warning(f"🚨 Cache storage error after {storage_time:.3f}s: {e}", "GraphOps")
-
-    def _make_serializable(self, obj: Any) -> Any:
-        """Convert Microsoft Graph objects to JSON-serializable format."""
-        if obj is None:
-            return None
-        elif isinstance(obj, (str, int, float, bool)):
-            return obj
-        elif isinstance(obj, datetime):
-            return obj.isoformat()
-        elif isinstance(obj, list):
-            return [self._make_serializable(item) for item in obj]
-        elif isinstance(obj, dict):
-            return {k: self._make_serializable(v) for k, v in obj.items()}
-        elif hasattr(obj, '__dict__'):
-            # Handle Microsoft Graph objects
-            result = {}
-            
-            # Add type metadata for better reconstruction
-            obj_type = type(obj).__name__
-            if obj_type in ['User', 'Event', 'DirectoryObject', 'Location', 'DateTimeTimeZone', 'Attendee', 'EmailAddress']:
-                result['@odata.type'] = f'#microsoft.graph.{obj_type.lower()}'
-            
-            for key, value in obj.__dict__.items():
-                if not key.startswith('_'):  # Skip private attributes
-                    result[key] = self._make_serializable(value)
-            return result
-        else:
-            return str(obj)
-
-    def _reconstruct_from_cache(self, obj: Any, object_type_hint: str = None) -> Any:
-        """
-        Reconstruct Microsoft Graph-like objects from cached dictionary data.
-        
-        Rather than creating full Microsoft Graph objects (which may have complex dependencies),
-        this creates simple objects with the same interface as the original objects.
-        """
-        if obj is None:
-            return None
-        elif isinstance(obj, (str, int, float, bool)):
-            return obj
-        elif isinstance(obj, list):
-            return [self._reconstruct_from_cache(item, object_type_hint) for item in obj]
-        elif isinstance(obj, dict):
-            # Check if this looks like a Microsoft Graph object and create a simple proxy
-            if 'id' in obj and ('displayName' in obj or 'mail' in obj or 'userPrincipalName' in obj):
-                # Create a simple User-like object
-                return self._create_user_proxy(obj)
-            elif 'id' in obj and ('subject' in obj or 'start' in obj or 'end' in obj):
-                # Create a simple Event-like object  
-                return self._create_event_proxy(obj)
-            elif '@odata.type' in obj:
-                # Handle objects with type metadata
-                odata_type = obj.get('@odata.type', '')
-                if 'user' in odata_type.lower():
-                    return self._create_user_proxy(obj)
-                elif 'event' in odata_type.lower():
-                    return self._create_event_proxy(obj)
-            
-            # If we can't determine the type, create a generic proxy object
-            return self._create_generic_proxy(obj)
-        else:
-            return obj
-
-    def _create_user_proxy(self, data: dict):
-        """Create a User-like proxy object from dictionary data."""
-        class UserProxy:
-            def __init__(self, data):
-                for key, value in data.items():
-                    if not key.startswith('@'):  # Skip metadata
-                        setattr(self, key, value)
-                        
-            def __repr__(self):
-                return f"UserProxy(displayName={getattr(self, 'displayName', 'None')}, mail={getattr(self, 'mail', 'None')})"
-        
-        return UserProxy(data)
-
-    def _create_event_proxy(self, data: dict):
-        """Create an Event-like proxy object from dictionary data."""
-        class EventProxy:
-            def __init__(self, data):
-                for key, value in data.items():
-                    if not key.startswith('@'):  # Skip metadata
-                        # Handle nested objects like start, end, location, body
-                        if isinstance(value, dict):
-                            setattr(self, key, self._create_nested_proxy(value))
-                        elif isinstance(value, list):
-                            setattr(self, key, [self._create_nested_proxy(item) if isinstance(item, dict) else item for item in value])
-                        else:
-                            setattr(self, key, value)
-            
-            def _create_nested_proxy(self, nested_data):
-                """Create proxy for nested objects like start/end times, location, etc."""
-                class NestedProxy:
-                    def __init__(self, data):
-                        for k, v in data.items():
-                            if not k.startswith('@'):
-                                setattr(self, k, v)
-                return NestedProxy(nested_data)
-                            
-            def __repr__(self):
-                return f"EventProxy(subject={getattr(self, 'subject', 'None')}, id={getattr(self, 'id', 'None')})"
-        
-        return EventProxy(data)
-
-    def _create_generic_proxy(self, data: dict):
-        """Create a generic proxy object from dictionary data."""
-        class GenericProxy:
-            def __init__(self, data):
-                self._data = data
-                for key, value in data.items():
-                    if not key.startswith('@'):  # Skip metadata
-                        setattr(self, key, value)
-                        
-            def __getitem__(self, key):
-                """Support dictionary-like access for backward compatibility"""
-                return self._data[key]
-                
-            def __contains__(self, key):
-                """Support 'in' operator"""
-                return key in self._data
-                
-            def get(self, key, default=None):
-                """Support dict.get() method"""
-                return self._data.get(key, default)
-                
-            def keys(self):
-                """Support dict.keys() method"""
-                return self._data.keys()
-                
-            def values(self):
-                """Support dict.values() method"""
-                return self._data.values()
-                
-            def items(self):
-                """Support dict.items() method"""
-                return self._data.items()
-        
-        return GenericProxy(data)
-
-    def _is_cacheable_result(self, result) -> bool:
-        """
-        Determine if a result should be cached based on cache-aside pattern.
-        
-        Empty results are not cached to avoid caching temporary states:
-        - None values
-        - Empty lists []
-        - Empty dictionaries {}
-        - Empty strings ""
-        - Empty tuples ()
-        - Empty sets set()
-        
-        Args:
-            result: The result to evaluate for caching
-            
-        Returns:
-            bool: True if result should be cached, False otherwise
-        """
-        # Handle None explicitly
-        if result is None:
-            return False
-        
-        # Handle collections (list, dict, tuple, set)
-        if hasattr(result, '__len__'):
-            return len(result) > 0
-        
-        # Handle strings specifically (they have __len__ but need special handling)
-        if isinstance(result, str):
-            return bool(result.strip())  # Don't cache empty or whitespace-only strings
-        
-        # For other types (numbers, booleans, custom objects), cache them
-        # This includes False, 0, etc. which are valid results to cache
-        return True    
-
-    @trace_async_method("cache_wrapper")
-    async def _cache_wrapper(self, method_name: str, cache_type: str, method_func, *args, **kwargs):
-        """Generic cache wrapper for Graph API methods with comprehensive telemetry.
-        
-        Implements cache-aside pattern with the following behavior:
-        - Empty results (None, [], {}, empty strings) are NOT cached
-        - Only successful non-empty results are cached
-        - Cache misses always call the underlying method
-        """
-        # Generate cache key
-        cache_key = self._generate_cache_key(method_name, *args, **kwargs)
-        
-        # Track overall operation timing
-        operation_start = time.time()
-        
-        # Try to get from cache first
-        cached_result = await self._get_from_cache(cache_key)
-        if cached_result is not None:
-            cache_time = time.time() - operation_start
-            console_info(f"🎯 Cache hit for {method_name} - returned in {cache_time:.3f}s", "GraphOps")
-            return cached_result
-        
-        # Cache miss - call the actual method
-        console_debug(f"🔄 Cache miss for {method_name} - calling Graph API", "GraphOps")
-        api_start_time = time.time()
-        
-        try:
-            result = await method_func(*args, **kwargs)
-            api_duration = time.time() - api_start_time
-            
-            # Only cache non-empty results (cache-aside pattern)
-            if self._is_cacheable_result(result):
-                ttl = self.cache_ttl_config.get(cache_type, self.cache_ttl)
-                await self._set_cache(cache_key, result, ttl)
-                cache_status = f"cached for {ttl}s"
-            else:
-                cache_status = "not cached (empty result)"
-            
-            total_duration = time.time() - operation_start
-            console_info(f"✅ {method_name} completed: API={api_duration:.2f}s, Total={total_duration:.2f}s ({cache_status})", "GraphOps")
-            return result
-            
-        except Exception as e:
-            api_duration = time.time() - api_start_time
-            total_duration = time.time() - operation_start
-            console_error(f"❌ {method_name} failed: API={api_duration:.2f}s, Total={total_duration:.2f}s - {e}", "GraphOps")
-            raise
-
-    @trace_async_method("cache_close")
-    async def close_cache(self):
-        """Close Redis connection when done with telemetry."""
-        if self.redis_client:
-            start_time = time.time()
-            try:
-                console_telemetry_event("redis_connection_closing", {
-                    "redis_url": self.redis_url
-                }, "GraphOps")
-                
-                await self.redis_client.close()
-                close_time = time.time() - start_time
-                console_info(f"🔒 Redis connection closed successfully in {close_time:.3f}s", "GraphOps")
-                console_telemetry_event("redis_connection_closed", {
-                    "close_time_ms": round(close_time * 1000, 2),
-                    "redis_url": self.redis_url
-                }, "GraphOps")
-                
-            except Exception as e:
-                close_time = time.time() - start_time
-                console_warning(f"🚨 Error closing Redis connection after {close_time:.3f}s: {e}", "GraphOps")
-                console_telemetry_event("redis_connection_close_failed", {
-                    "close_time_ms": round(close_time * 1000, 2),
-                    "error": str(e),
-                    "redis_url": self.redis_url
-                }, "GraphOps")
-
     def _get_client(self) -> GraphServiceClient:
         """Get or create the Graph client with lazy initialization."""
         if self.graph_client is None:
@@ -810,8 +318,9 @@ class GraphOperations:
         return self.graph_client
     
     # Get Current Date and Time
-    def get_current_datetime(self) -> str:
-        return datetime.now().isoformat()
+    async def get_current_datetime(self) -> str:
+        from datetime import timezone
+        return datetime.now(timezone.utc).isoformat()
     
     async def debug_graph_connection(self) -> dict:
         """
@@ -881,16 +390,10 @@ class GraphOperations:
     @trace_async_method("get_system_health_status")
     async def get_system_health_status(self) -> Dict[str, Any]:
         """
-        Get comprehensive system health status including cache, telemetry, and Graph API connectivity.
+        Get comprehensive system health status including telemetry and Graph API connectivity.
         """
         health_status = {
             "timestamp": datetime.now().isoformat(),
-            "cache": {
-                "enabled": self.cache_enabled,
-                "redis_available": REDIS_AVAILABLE,
-                "redis_url": self.redis_url if self.cache_enabled else None,
-                "cache_ttl_config": self.cache_ttl_config
-            },
             "telemetry": {
                 "available": TELEMETRY_AVAILABLE,
                 "explicitly_disabled": TELEMETRY_EXPLICITLY_DISABLED
@@ -904,30 +407,11 @@ class GraphOperations:
                 ])
             }
         }
-        
-        # Test Redis connection if enabled
-        if self.cache_enabled:
-            try:
-                redis_client = await self._get_redis_client()
-                if redis_client:
-                    await redis_client.ping()
-                    health_status["cache"]["status"] = "connected"
-                    console_debug("Redis health check: connected", "GraphOps")
-                else:
-                    health_status["cache"]["status"] = "unavailable"
-            except Exception as e:
-                health_status["cache"]["status"] = "error"
-                health_status["cache"]["error"] = str(e)
-                console_warning(f"Redis health check failed: {e}", "GraphOps")
-        else:
-            health_status["cache"]["status"] = "disabled"
-        
+
         # Test Graph API connection
         try:
             if health_status["graph_api"]["credentials_configured"]:
-                # Simple test to validate connectivity
                 client = self._get_client()
-                # Just test client creation, not an actual API call to avoid rate limits
                 health_status["graph_api"]["status"] = "configured"
                 console_debug("Graph API health check: configured", "GraphOps")
             else:
@@ -936,178 +420,12 @@ class GraphOperations:
             health_status["graph_api"]["status"] = "error"
             health_status["graph_api"]["error"] = str(e)
             console_warning(f"Graph API health check failed: {e}", "GraphOps")
-        
+
         # Log health status to telemetry
         console_telemetry_event("system_health_check", health_status, "GraphOps")
-        
+
         return health_status
-    
-    @trace_async_method("invalidate_cache")
-    async def invalidate_cache(self, pattern: str = None) -> Dict[str, Any]:
-        """
-        Invalidate cache entries, optionally by pattern.
-        
-        Args:
-            pattern (str, optional): Redis pattern to match keys for deletion (e.g., "graph:*", "graph:get_user_*")
-                                   If None, provides status without deletion
-                                   
-        Returns:
-            Dict[str, Any]: Information about cache invalidation operation
-        """
-        if not self.cache_enabled:
-            return {
-                "success": False,
-                "message": "Cache not enabled",
-                "deleted_keys": 0
-            }
-        
-        try:
-            redis_client = await self._get_redis_client()
-            if not redis_client:
-                return {
-                    "success": False,
-                    "message": "Redis client not available",
-                    "deleted_keys": 0
-                }
-            
-            if pattern:
-                # Find keys matching the pattern
-                keys = await redis_client.keys(pattern)
-                deleted_count = 0
-                
-                if keys:
-                    # For Redis Cluster compatibility, delete keys one by one
-                    # This avoids the "Keys in request don't hash to the same slot" error
-                    # that occurs when using `delete(*keys)` with multiple keys that hash 
-                    # to different slots in a Redis cluster setup
-                    for key in keys:
-                        try:
-                            result = await redis_client.delete(key)
-                            deleted_count += result
-                        except Exception as key_error:
-                            console_warning(f"Failed to delete cache key {key}: {key_error}", "GraphOps")
-                            # Continue with other keys even if one fails
-                            continue
-                    
-                    console_info(f"Invalidated {deleted_count} cache keys matching pattern: {pattern}", "GraphOps")
-                    console_telemetry_event("cache_invalidation", {
-                        "pattern": pattern,
-                        "deleted_keys": deleted_count
-                    }, "GraphOps")
-                else:
-                    console_info(f"No cache keys found matching pattern: {pattern}", "GraphOps")
-                
-                return {
-                    "success": True,
-                    "message": f"Invalidated {deleted_count} keys matching pattern: {pattern}",
-                    "deleted_keys": deleted_count,
-                    "pattern": pattern
-                }
-            else:
-                # Just return cache status
-                all_keys = await redis_client.keys("graph:*")
-                return {
-                    "success": True,
-                    "message": "Cache status retrieved",
-                    "total_keys": len(all_keys),
-                    "pattern": "graph:*"
-                }
-                
-        except Exception as e:
-            error_message = str(e)
-            
-            # Provide specific guidance for Redis cluster issues
-            if "hash to the same slot" in error_message:
-                console_error(f"Redis cluster cache invalidation failed (slot hashing issue): {e}", "GraphOps")
-                console_info("This should not happen with the current implementation. Please check Redis cluster configuration.", "GraphOps")
-            elif "CROSSSLOT" in error_message:
-                console_error(f"Redis cluster cross-slot operation failed: {e}", "GraphOps")
-                console_info("Keys are hashing to different slots. Using single-key deletion fallback.", "GraphOps")
-            else:
-                console_error(f"Cache invalidation failed: {e}", "GraphOps")
-            
-            console_telemetry_event("cache_invalidation_failed", {
-                "pattern": pattern,
-                "error": str(e)
-            }, "GraphOps")
-            return {
-                "success": False,
-                "message": f"Cache invalidation failed: {e}",
-                "deleted_keys": 0,
-                "error": str(e)
-            }
-    
-    @trace_async_method("get_cache_statistics")
-    async def get_cache_statistics(self) -> Dict[str, Any]:
-        """
-        Get detailed cache statistics and health information.
-        
-        Returns:
-            Dict[str, Any]: Cache statistics including key counts, memory usage, etc.
-        """
-        if not self.cache_enabled:
-            return {
-                "enabled": False,
-                "message": "Cache not enabled"
-            }
-        
-        try:
-            redis_client = await self._get_redis_client()
-            if not redis_client:
-                return {
-                    "enabled": True,
-                    "status": "unavailable",
-                    "message": "Redis client not available"
-                }
-            
-            # Get Redis info
-            info = await redis_client.info()
-            
-            # Count keys by type
-            all_keys = await redis_client.keys("graph:*")
-            key_stats = {}
-            
-            for key in all_keys:
-                key_type = key.split(':')[1] if ':' in key else 'unknown'
-                key_stats[key_type] = key_stats.get(key_type, 0) + 1
-            
-            cache_stats = {
-                "enabled": True,
-                "status": "connected",
-                "redis_version": info.get('redis_version', 'unknown'),
-                "total_keys": len(all_keys),
-                "key_stats_by_type": key_stats,
-                "memory": {
-                    "used_memory": info.get('used_memory', 0),
-                    "used_memory_human": info.get('used_memory_human', '0B'),
-                    "used_memory_peak": info.get('used_memory_peak', 0),
-                    "used_memory_peak_human": info.get('used_memory_peak_human', '0B')
-                },
-                "connections": {
-                    "connected_clients": info.get('connected_clients', 0),
-                    "blocked_clients": info.get('blocked_clients', 0)
-                },
-                "cache_ttl_config": self.cache_ttl_config,
-                "redis_url": self.redis_url
-            }
-            
-            console_telemetry_event("cache_statistics_retrieved", {
-                "total_keys": len(all_keys),
-                "key_types": list(key_stats.keys()),
-                "memory_used": info.get('used_memory', 0)
-            }, "GraphOps")
-            
-            return cache_stats
-            
-        except Exception as e:
-            console_error(f"Failed to get cache statistics: {e}", "GraphOps")
-            return {
-                "enabled": True,
-                "status": "error",
-                "message": f"Failed to get statistics: {e}",
-                "error": str(e)
-            }
-    
+
     async def _is_likely_conference_room(self, user_id: str) -> bool:
         """
         Check if a user ID is likely a conference room based on common patterns.
@@ -1147,80 +465,8 @@ class GraphOperations:
             return False
     
     async def _invalidate_calendar_cache(self, user_id: str, operation: str = "update", location: str = None) -> None:
-        """
-        Invalidate calendar-related cache entries for a specific user and optionally event.
-        
-        This method ensures data consistency by clearing cache entries for:
-        - get_user_calendar_events_by_user_id() - calendar event lists for the user        
-        - get_conference_room_events() - conference room events (if user is a conference room)
-        - get_all_conference_rooms() - conference room list (if user is a conference room)
-        - Any other calendar-related cached methods
-        
-        Args:
-            user_id (str): The user ID whose calendar caches should be invalidated            
-            operation (str): The operation being performed (for logging)
-            location (str, optional): Location of the event (to detect conference room involvement)
-        """
-        if not self.cache_enabled:
-            return
-        
-        try:
-            patterns_to_invalidate = []
-            
-            # Always invalidate calendar list caches for the user
-            # These patterns match the actual cached methods
-            patterns_to_invalidate.extend([
-                f"graph:get_user_calendar_events_by_user_id:*",  # Main calendar events method
-                f"graph:get_calendar_events:*",                  # Generic calendar events patterns
-                f"graph:*calendar*events*{user_id}*"             # Catch any calendar/events patterns with user_id
-            ])
-            
-            # Check if this might be a conference room based on common patterns
-            is_likely_conference_room = await self._is_likely_conference_room(user_id)
-            
-            # Also check if the location suggests conference room involvement
-            location_suggests_room = False
-            if location:
-                location_lower = location.lower()
-                location_suggests_room = ('conference room' in location_lower or
-                                        'meeting room' in location_lower or
-                                        'room ' in location_lower or
-                                        location_lower.startswith('room'))
-            
-            if is_likely_conference_room or location_suggests_room:
-                # Also invalidate conference room related caches
-                patterns_to_invalidate.extend([
-                    f"graph:get_conference_room_events:*",        # Conference room events
-                    f"graph:get_all_conference_rooms:*",          # Conference room lists
-                    f"graph:get_conference_room_details_by_id:*", # Conference room details
-                    f"graph:*conference*room*",                   # Any conference room patterns
-                ])
-                
-                if is_likely_conference_room:
-                    console_debug(f"User {user_id} identified as conference room - invalidating room caches", "GraphOps")
-                if location_suggests_room:
-                    console_debug(f"Location '{location}' suggests conference room - invalidating room caches", "GraphOps")
-                        
-            # Invalidate each pattern
-            total_deleted = 0
-            for pattern in patterns_to_invalidate:
-                result = await self.invalidate_cache(pattern)
-                if result.get("success", False):
-                    total_deleted += result.get("deleted_keys", 0)
-            
-            console_debug(f"Calendar cache invalidation after {operation}: {total_deleted} keys deleted for user {user_id}", "GraphOps")
-            console_telemetry_event("calendar_cache_invalidation", {
-                "user_id": user_id,                
-                "operation": operation,
-                "deleted_keys": total_deleted,
-                "patterns_count": len(patterns_to_invalidate),
-                "conference_room_caches_invalidated": is_likely_conference_room or location_suggests_room,
-                "detected_as_conference_room": is_likely_conference_room,
-                "location_suggests_room": location_suggests_room
-            }, "GraphOps")
-            
-        except Exception as e:
-            console_warning(f"Failed to invalidate calendar cache after {operation}: {e}", "GraphOps")
+        """No-op: caching has been removed."""
+        pass
     
     def _has_valid_mailbox_properties(self, user: User) -> bool:
         """
@@ -1393,12 +639,7 @@ class GraphOperations:
         Returns:
             dict: Validation result with 'valid', 'message', and 'user_info' keys
         """
-        return await self._cache_wrapper(
-            "validate_user_mailbox", 
-            "mailbox_validation", 
-            self._validate_user_mailbox_impl, 
-            user_id
-        )
+        return await self._validate_user_mailbox_impl(user_id)
     
     async def _validate_user_mailbox_impl(self, user_id: str) -> dict:
         """Internal implementation of validate_user_mailbox."""
@@ -1503,12 +744,7 @@ class GraphOperations:
     # Get a user by user ID
     @trace_async_method("get_user_by_user_id")
     async def get_user_by_user_id(self, user_id: str) -> User | None:
-        return await self._cache_wrapper(
-            "get_user_by_user_id", 
-            "user_info", 
-            self._get_user_by_user_id_impl, 
-            user_id
-        )
+        return await self._get_user_by_user_id_impl(user_id)
     
     async def _get_user_by_user_id_impl(self, user_id: str) -> User | None:
         try:
@@ -1540,12 +776,7 @@ class GraphOperations:
     # Get a users manager by user ID
     @trace_async_method("get_users_manager_by_user_id")
     async def get_users_manager_by_user_id(self, user_id: str) -> DirectoryObject  | None:
-        return await self._cache_wrapper(
-            "get_users_manager_by_user_id", 
-            "user_info", 
-            self._get_users_manager_by_user_id_impl, 
-            user_id
-        )
+        return await self._get_users_manager_by_user_id_impl(user_id)
     
     async def _get_users_manager_by_user_id_impl(self, user_id: str) -> DirectoryObject  | None:
         try:
@@ -1628,13 +859,7 @@ class GraphOperations:
         Returns:
             List[User]: List of User objects, optionally filtered to exclude users without mailboxes
         """
-        return await self._cache_wrapper(
-            "get_all_users", 
-            "user_info", 
-            self._get_all_users_impl, 
-            max_results, 
-            exclude_inactive_mailboxes
-        )
+        return await self._get_all_users_impl(max_results, exclude_inactive_mailboxes)
     
     async def _get_all_users_impl(self, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
         try:
@@ -1719,12 +944,7 @@ class GraphOperations:
         Returns:
             List[User]: List of User objects representing conference rooms
         """
-        return await self._cache_wrapper(
-            "get_all_conference_rooms", 
-            "conference_rooms", 
-            self._get_all_conference_rooms_impl, 
-            max_results
-        )
+        return await self._get_all_conference_rooms_impl(max_results)
     
     async def _get_all_conference_rooms_impl(self, max_results) -> List[User]:
         try:
@@ -1830,12 +1050,7 @@ class GraphOperations:
         
     # Get all departments
     async def get_all_departments(self, max_results) -> List[str]:
-        return await self._cache_wrapper(
-            "get_all_departments", 
-            "departments", 
-            self._get_all_departments_impl, 
-            max_results
-        )
+        return await self._get_all_departments_impl(max_results)
     
     async def _get_all_departments_impl(self, max_results) -> List[str]:
         try:
@@ -1887,14 +1102,7 @@ class GraphOperations:
         Returns:
             List[User]: List of User objects in the specified department
         """
-        return await self._cache_wrapper(
-            "get_users_by_department", 
-            "user_info", 
-            self._get_users_by_department_impl, 
-            department, 
-            max_results, 
-            exclude_inactive_mailboxes
-        )
+        return await self._get_users_by_department_impl(department, max_results, exclude_inactive_mailboxes)
     
     async def _get_users_by_department_impl(self, department: str, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
         if not department:
@@ -1957,14 +1165,7 @@ class GraphOperations:
         Returns:
             List[User]: List of User objects matching the filter criteria
         """
-        return await self._cache_wrapper(
-            "search_users", 
-            "search_results", 
-            self._search_users_impl, 
-            filter, 
-            max_results, 
-            exclude_inactive_mailboxes
-        )
+        return await self._search_users_impl(filter, max_results, exclude_inactive_mailboxes)
     
     async def _search_users_impl(self, filter, max_results, exclude_inactive_mailboxes: bool = True) -> List[User]:
         try:
@@ -2105,14 +1306,7 @@ class GraphOperations:
     # Calendar Operations
     # Get calendar events for a user by user ID with optional date range
     async def get_user_calendar_events_by_user_id(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> List[Event] | None:
-        return await self._cache_wrapper(
-            "get_user_calendar_events_by_user_id", 
-            "calendar_events", 
-            self._get_user_calendar_events_by_user_id_impl, 
-            user_id, 
-            start_date, 
-            end_date,
-        )
+        return await self._get_user_calendar_events_by_user_id_impl(user_id, start_date, end_date)
     
     async def _get_user_calendar_events_by_user_id_impl(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> List[Event] | None:
         try:
@@ -2128,28 +1322,41 @@ class GraphOperations:
             
             # If we have a valid user, proceed with calendar access
             try:
-                from msgraph.generated.users.item.calendar.events.events_request_builder import EventsRequestBuilder
-                
-                # Configure query parameters to order by start date
-                events_query_params = EventsRequestBuilder.EventsRequestBuilderGetQueryParameters()
-                events_query_params.orderby = ["start/dateTime"]
-                events_query_params.select = self.calendar_response_fields
-                
-                # Add date range filter if provided
-                filters = []
+                from msgraph.generated.users.item.calendar_view.calendar_view_request_builder import CalendarViewRequestBuilder
+
+                # calendarView is the correct endpoint for date-range queries — it handles
+                # timezone conversion properly, unlike /events with OData date filters.
+                # Prefer header returns event times in the user's mailbox timezone (NYC = EST).
+                MAILBOX_TIMEZONE = "Eastern Standard Time"
+
+                calendar_view_query_params = CalendarViewRequestBuilder.CalendarViewRequestBuilderGetQueryParameters()
+                calendar_view_query_params.orderby = ["start/dateTime"]
+                calendar_view_query_params.select = self.calendar_response_fields
+
+                # startDateTime / endDateTime are required for calendarView.
+                # Accept UTC-aware datetimes from the caller and pass as ISO 8601 with offset.
+                from datetime import timezone as _tz
+                utc = _tz.utc
                 if start_date:
-                    filters.append(f"start/dateTime ge '{start_date.isoformat()}'")
+                    sd = start_date if start_date.tzinfo else start_date.replace(tzinfo=utc)
+                    calendar_view_query_params.start_date_time = sd.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+                else:
+                    # Default: start of today UTC
+                    calendar_view_query_params.start_date_time = datetime.now(utc).strftime('%Y-%m-%dT00:00:00+00:00')
+
                 if end_date:
-                    filters.append(f"end/dateTime le '{end_date.isoformat()}'")
+                    ed = end_date if end_date.tzinfo else end_date.replace(tzinfo=utc)
+                    calendar_view_query_params.end_date_time = ed.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+                else:
+                    # Default: end of today UTC
+                    calendar_view_query_params.end_date_time = datetime.now(utc).strftime('%Y-%m-%dT23:59:59+00:00')
 
-                if filters:
-                    events_query_params.filter = " and ".join(filters)
-                
-                events_request_config = EventsRequestBuilder.EventsRequestBuilderGetRequestConfiguration(
-                    query_parameters=events_query_params
+                events_request_config = CalendarViewRequestBuilder.CalendarViewRequestBuilderGetRequestConfiguration(
+                    query_parameters=calendar_view_query_params
                 )
+                events_request_config.headers.add("Prefer", f'outlook.timezone="{MAILBOX_TIMEZONE}"')
 
-                event_response = await self._get_client().users.by_user_id(user_id).calendar.events.get(request_configuration=events_request_config)
+                event_response = await self._get_client().users.by_user_id(user_id).calendar_view.get(request_configuration=events_request_config)
                 if hasattr(event_response, 'value') and event_response.value:
                     events = event_response.value
                     # Handle both dict and User object types for display name
@@ -2350,13 +1557,7 @@ class GraphOperations:
         Returns:
             Event: The calendar event, or None if not found
         """
-        return await self._cache_wrapper(
-            "get_calendar_event_by_id", 
-            "calendar_events", 
-            self._get_calendar_event_by_id_impl, 
-            user_id, 
-            event_id
-        )
+        return await self._get_calendar_event_by_id_impl(user_id, event_id)
     
     async def _get_calendar_event_by_id_impl(self, user_id: str, event_id: str) -> Event:
         try:
@@ -2923,14 +2124,7 @@ class GraphOperations:
         Returns:
             List[dict]: List of conference room objects with their events
         """
-        return await self._cache_wrapper(
-            "get_conference_room_events", 
-            "conference_room_events", 
-            self._get_conference_room_events_impl, 
-            conference_rooms, 
-            start_date, 
-            end_date
-        )
+        return await self._get_conference_room_events_impl(conference_rooms, start_date, end_date)
     
     async def _get_conference_room_events_impl(self, conference_rooms: List[User], start_date: datetime = None, end_date: datetime = None) -> List[dict]:
         try:
