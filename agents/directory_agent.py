@@ -57,6 +57,10 @@ RESPONSE STYLE:
 - For org hierarchy, default to a tree/indented format unless the user says otherwise.
 - Present user info clearly: name, title, email, department.
 - Respect privacy — share only work-relevant information.
+- When a department is not found by exact name, suggest the closest match(es) from
+  the available list (e.g., "Engineering" → "Application Development" or
+  "Information Technology") and offer to search in that department instead.
+  Do NOT just dump the full department list — pick the 1-2 most relevant matches.
 
 Session ID: {session_id}
 """.strip()

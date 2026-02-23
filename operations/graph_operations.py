@@ -1076,10 +1076,13 @@ class GraphOperations:
             if hasattr(response, 'value'):
                 users = response.value
                 for user in users:
+                    # Skip system/service accounts — they have no real mail address
+                    if not user.mail:
+                        continue
                     department = user.department
                     if department:
                         departments.add(department)
-                return list(departments)
+                return sorted(departments)
             else:
                 return []
             
