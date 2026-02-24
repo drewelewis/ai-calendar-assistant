@@ -19,6 +19,7 @@ from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 from agents import (
     create_calendar_agent,
     create_directory_agent,
+    create_email_agent,
     create_location_agent,
     create_risk_agent,
     create_proxy_agent,
@@ -44,8 +45,7 @@ the name of the agent best suited to handle it.
 
 Agents and their domains:
 - calendar   : scheduling meetings, calendar events, availability, conference rooms, Teams/Zoom meetings
-- directory  : finding people, user profiles, org chart, departments, managers, direct reports
-- location   : nearby places, restaurants, coffee shops, hotels, POI searches, maps, addresses
+- directory  : finding people, user profiles, org chart, departments, managers, direct reports- email      : reading email, checking inbox, searching mail, sending email, email summaries- location   : nearby places, restaurants, coffee shops, hotels, POI searches, maps, addresses
 - risk       : client risk profiles, financial exposure, credit risk, portfolio analysis, compliance
 - proxy      : greetings, general questions, clarification, anything else
 
@@ -180,6 +180,7 @@ class MultiAgentOrchestrator:
             "proxy":     create_proxy_agent(shared_service, self.service_id, self.session_id, self.settings),
             "calendar":  create_calendar_agent(shared_service, self.service_id, self.session_id, self.settings),
             "directory": create_directory_agent(shared_service, self.service_id, self.session_id, self.settings),
+            "email":     create_email_agent(shared_service, self.service_id, self.session_id, self.settings),
             "location":  create_location_agent(shared_service, self.service_id, self.session_id, self.settings),
             "risk":      create_risk_agent(shared_service, self.service_id, self.session_id, self.settings),
         }

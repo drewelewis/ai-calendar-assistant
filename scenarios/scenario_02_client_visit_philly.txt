@@ -1,0 +1,137 @@
+================================================================================
+DEMO SCENARIO 2 — "Client Visit, Philly"
+================================================================================
+PERSONA : Kevin Tran | Director of Consumer Lending
+LOGIN   : ketran@MngEnvMCAP623732.onmicrosoft.com
+PASSWORD: TempP@ss2026!
+USER ID : 2bb1752e-e0fe-4fa6-8b10-a417603257c7
+
+STORY   : Kevin is on the road in Philadelphia, fresh out of a client meeting 
+          with Atlantic Mortgage Aggregators. He needs to understand their risk 
+          exposure, loop in his leadership chain, get a meeting on the books —
+          and find a coffee shop before his next call.
+
+EXPECTED TOTAL TIME: ~6–8 minutes
+================================================================================
+
+
+── TURN 1 — Location Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  I just finished a meeting near 30th Street Station in Philadelphia.
+  Find me a coffee shop within walking distance.
+
+WHAT HAPPENS:
+  • Azure Maps real-time search — coffee_shop, Philadelphia 30th Street Station
+  • Returns 5–8 results with name, address, phone, distance
+  • No clarifying questions — just results
+
+WOW FACTOR: Opens the demo with something immediately tangible and relatable.
+            Real POI data. Real addresses. Real distances.
+
+
+── TURN 2 — Risk Agent ─────────────────────────────────────────────────────────
+
+PROMPT:
+  While I'm here — pull up the risk profile for Atlantic Mortgage Aggregators.
+
+WHAT HAPPENS:
+  • Finds ATLANTIC MORTGAGE AGGREGATORS (client ID 1006528374)
+  • Returns:
+      Risk Rating  : MEDIUM-HIGH ⚠️
+      Status       : Active
+      Primary Exp  : $1,245,000,000
+      Commitment   : $5,000,000,000  ← largest commitment in the portfolio
+      Industry     : Mortgage Banking — Non-Bank Originator
+      Key Risks    : Interest rate pipeline exposure, MSR valuation volatility,
+                     warehouse line liquidity dependency during market dislocations
+
+  • Agent commentary:
+      "Atlantic carries a $5B commitment — the largest in our portfolio — 
+       with Medium-High risk driven by interest rate sensitivity and 
+       warehouse line liquidity risk during market dislocations.
+       Worth a direct conversation with your leadership chain."
+
+WOW FACTOR: $5B in commitment. That number lands hard in a room.
+            The AI flags it and tells you what it means — no analyst required.
+
+
+── TURN 3 — Directory Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  Who does Angela Moss have on her branch team? And who is my boss?
+
+WHAT HAPPENS:
+  • Fetches direct reports for Angela Moss:
+      ├── Sandra Osei — Branch Manager (New York)
+      └── Derek Novak — Branch Manager (Hartford)
+  • Fetches Kevin's manager: Robert Faulkner — Chief Retail Banking Officer (New York)
+
+WOW FACTOR: Two org lookups in one question, answered in parallel, instantly.
+            The AI figures out "my boss" means Kevin's manager from context.
+
+
+── TURN 4 — Calendar Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  I need to brief my boss and Angela Moss on the Atlantic situation.
+  Set up a Teams call Thursday at 10am. Call it "Atlantic Mortgage Risk Briefing."
+  Add my analyst James Whitfield too.
+
+WHAT HAPPENS:
+  • Validates Robert Faulkner, Angela Moss, James Whitfield mailboxes in parallel
+  • Checks all calendars for Thursday 10am
+  • Presents confirmation summary:
+      Subject   : Atlantic Mortgage Risk Briefing
+      When      : Thursday at 10:00 AM
+      Attendees : Robert Faulkner, Angela Moss, James Whitfield
+      Type      : Microsoft Teams
+  • On confirm → creates Teams meeting, returns join link
+
+WOW FACTOR: Kevin just named three people naturally. The AI looked them up,
+            validated their mailboxes, checked availability, and booked it —
+            in the time it would normally take to find one email address.
+
+
+── TURN 5 — Portfolio Close ────────────────────────────────────────────────────
+
+PROMPT:
+  Actually — before Thursday, I want to know if there are other clients 
+  in our portfolio with High risk ratings.
+
+WHAT HAPPENS:
+  • Risk Agent runs portfolio overview
+  • Identifies all High-rated clients:
+      MERIDIAN CAPITAL INVESTMENTS  — High  (European Investment Banking)
+      HARBOR VIEW PRIVATE EQUITY    — High  (Under Review — LBO)
+      COASTAL BRIDGE ADVISORS       — High  (CLO/Leveraged Loans)
+      DEUTSCHE PFANDBRIEFBANK AG    — High  (Watch List — US CRE)
+      CAROLINAS REIT PARTNERS       — High  (Watch List — Office REIT)
+
+  • Agent: "You have 5 clients rated High risk. Two are on the Watch List 
+           and one (Harbor View) is currently Under Review. 
+           Would you like me to schedule a portfolio review with your team?"
+
+WOW FACTOR: The AI spots a pattern across the portfolio and immediately offers 
+            to act on it. This is the "insight to action" moment.
+
+
+── OPTIONAL CLOSER ─────────────────────────────────────────────────────────────
+
+PROMPT (if time allows):
+  Yes — set up a portfolio review with Robert Faulkner next Monday at 9am.
+
+WHAT HAPPENS:
+  • Calendar Agent: confirms Monday 9am with Robert Faulkner
+  • Books Teams meeting: "Retail Banking Portfolio Risk Review"
+  • Returns join link
+
+
+================================================================================
+SCENARIO 2 AGENT SCOREBOARD
+================================================================================
+  Location Agent   → Turn 1                        Azure Maps — Philly coffee shops
+  Risk Agent       → Turn 2, Turn 5                $5B exposure + portfolio sweep
+  Directory Agent  → Turn 3                        Org lookups — manager + direct reports
+  Calendar Agent   → Turn 4, (optional)            Teams meeting + optional follow-up
+================================================================================

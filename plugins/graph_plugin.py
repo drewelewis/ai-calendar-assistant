@@ -1315,6 +1315,127 @@ class GraphPlugin:
     ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
+        Retrieve emails from the current user's mailbox via Microsoft Graph.
+
+        USE THIS WHEN:
+        - User asks to check email, see inbox, or find a specific message
+        - User mentions receiving an email (e.g., "I got an email from the CFO")
+        - You need to find an email before reading or replying to it
+        - Searching for emails about a topic, from a sender, or by date
+
+        PARAMETERS:
+        - folder: 'inbox' (default), 'sentitems', 'drafts', 'deleteditems'
+        - search: Free-text search — e.g., 'harbor view', 'from:cfo subject:stress'
+                  Use this for natural-language searches. Cannot combine with filter_expr.
+        - filter_expr: OData $filter string — e.g., 'isRead eq false', 'importance eq high'
+                       Cannot combine with search.
+        - max_results: Number of emails to return (1–50, default: 10)
+
+        RETURNS:
+        - List of email summaries: id, subject, from_name, from_address, received,
+          body_preview, is_read, importance, has_attachments
+        - Use the 'id' from a result to call get_email_body for the full content
+
+        WORKFLOW:
+        - Call get_emails → get list with ids
+        - Call get_email_body with the id → read full content
+        - Call send_email to reply or compose
+        """
+    )
+    async def get_emails(
+        self,
+        folder: Annotated[str, "Mail folder: 'inbox' (default), 'sentitems', 'drafts', or 'deleteditems'"] = "inbox",
+        search: Annotated[str, "Free-text search string. Examples: 'harbor view', 'from:cfo subject:stress'. Cannot combine with filter."] = None,
+        filter_expr: Annotated[str, "OData filter expression. Examples: 'isRead eq false', 'importance eq high', 'from/emailAddress/address eq \'cfo@contoso.com\''. Cannot combine with search."] = None,
+        max_results: Annotated[int, "Maximum number of emails to return (1–50, default: 10)"] = 10,
+    ) -> Annotated[List[dict], "Returns a list of email summaries with id, subject, from, received, bodyPreview, isRead, importance, hasAttachments."]:
+        self._log_function_call("get_emails", folder=folder, search=search, filter_expr=filter_expr, max_results=max_results)
+        self._send_friendly_notification(f"📬 Fetching emails from {folder}...")
+        try:
+            return await graph_operations.get_emails(self.session_id, folder, search, filter_expr, max_results)
+        except Exception as e:
+            print(f"Error in get_emails: {e}")
+            return [{"error": str(e)}]
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Retrieve the full body of a specific email by its message ID.
+
+        USE THIS WHEN:
+        - User says 'open that email', 'read it', 'show me the full email'
+        - You need the complete email content, not just the preview
+        - You are summarising, replying to, or forwarding an email
+
+        WORKFLOW:
+        - First call get_emails to find the message and get its 'id'
+        - Then call get_email_body with that id to retrieve the full content
+
+        PARAMETERS:
+        - message_id: The 'id' field from a get_emails result (required)
+
+        RETURNS:
+        - dict with: id, subject, from_name, from_address, received, body_content, body_type, is_read, importance
+        """
+    )
+    async def get_email_body(
+        self,
+        message_id: Annotated[str, "The message ID from a previous get_emails call"],
+    ) -> Annotated[dict, "Returns full email content including body_content."]:
+        self._log_function_call("get_email_body", message_id=message_id)
+        self._send_friendly_notification("📖 Opening email...")
+        try:
+            return await graph_operations.get_email_body(self.session_id, message_id)
+        except Exception as e:
+            print(f"Error in get_email_body: {e}")
+            return {"error": str(e)}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Send an email on behalf of the current session user via Microsoft Graph.
+
+        USE THIS WHEN:
+        - Agent needs to notify someone by email (e.g., escalation, alert, summary)
+        - User asks to send an email or forward information to a colleague
+        - An automated workflow requires emailing a stakeholder
+
+        PARAMETERS:
+        - to_address: Recipient's email address (required)
+        - subject: Email subject line (required)
+        - body: Full email body — plain text or HTML (required)
+        - body_type: "HTML" (default) or "Text"
+
+        RETURNS:
+        - dict with 'status' ("sent" or "error"), 'to', and 'subject' keys
+
+        NOTES:
+        - The email is sent FROM the current session user (session_id)
+        - A copy is saved to the sender's Sent Items automatically
+        - Use HTML for rich formatting; use Text for simple plain-text emails
+        """
+    )
+    async def send_email(
+        self,
+        to_address: Annotated[str, "Recipient email address"],
+        subject: Annotated[str, "Email subject line"],
+        body: Annotated[str, "Email body content (plain text or HTML)"],
+        body_type: Annotated[str, "Content type: 'HTML' (default) or 'Text'"] = "HTML",
+    ) -> Annotated[dict, "Returns status dict with keys 'status', 'to', and 'subject'."]:
+        self._log_function_call("send_email")
+        self._send_friendly_notification(f"📧 Sending email to {to_address}...")
+        try:
+            return await graph_operations.send_email(self.session_id, to_address, subject, body, body_type)
+        except Exception as e:
+            print(f"Error in send_email: {e}")
+            return {"status": "error", "error": str(e)}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
         Get the current date and time in standardized ISO format for calendar and scheduling operations.
         
         USE THIS WHEN:

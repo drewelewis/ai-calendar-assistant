@@ -1,0 +1,218 @@
+================================================================================
+DEMO SCENARIO 1 — "Monday Morning, Red Flag"
+================================================================================
+PERSONA : Catherine Brooks | Chief Operating Officer
+LOGIN   : cabrooks@MngEnvMCAP623732.onmicrosoft.com
+PASSWORD: TempP@ss2026!
+USER ID : 967eb41e-163d-4a02-be26-fde3bbafd662
+
+STORY   : Catherine Brooks, COO of Contoso Bank, gets in Monday morning to an email from
+          the CFO: weekend stress-testing flagged three names in the wealth 
+          book with elevated covenant exposure given Friday's rate move.
+
+          Harbor View Private Equity is at the top of the list. 
+          Catherine needs her arms around the full org before she digs into the risk, 
+          then needs to get the right people on a call — all before her 
+          10am with the CEO. 
+          
+         Catherine's next step is to address a conversation she had via a Teams Chat with Julie Parker.
+
+          It seems the AI rollout at Contoso is on track to be 6 months late.  The competitors are
+          way ahead and have created efficiencies that enhance employee capabilities and are now expanding
+          into customer facing Agentic Systems.
+
+          She needs a daily teams meeting where both IT leadership and App Dev Leaders will give updates on
+          technology rollout plans, upskilling strategies, and status on our AI poilot program.
+
+          Catherine also wants to do a visit at the Contoso office in Philly. She needs to reach out to
+          the folks in Philadelphia to get a meet and greet lunch together by the Art Museum.
+
+          Finally, it's been a while since Catherine has had real face time with Julie Parker, the CEO.
+          Julie loves coffee. Catherine wants to find a cozy coffee shop in Midtown where they can catch
+          up off-the-clock at 6pm — low key, no agenda, just the two of them.
+
+          She does it all without leaving the chat window.
+
+
+
+EXPECTED TOTAL TIME: ~12–15 minutes
+================================================================================
+
+
+── TURN 1 — Directory Agent ────────────────────────────────────────────────────
+
+PROMPT:
+  Show me my team.
+
+WHAT HAPPENS:
+  • Fetches live M365 org data — no questions asked
+  • Returns Catherine's full cross-divisional hierarchy in tree format:
+
+      Catherine Brooks — Chief Operating Officer
+      ├── Linda Hartwell — Chief Wealth Management Officer
+      │   ├── Marcus Okafor — Director of Private Banking
+      │   │   ├── Nathan Briggs — Senior Wealth Advisor (New York)
+      │   │   └── Tom Gallagher — Wealth Advisor (Boston)
+      │   └── Diane Chu — Director of Trust and Investment Services
+      │       ├── Sofia Reyes — Senior Wealth Advisor (Hartford)
+      │       └── Priya Nair — Portfolio Analyst (New York)
+      ├── Robert Faulkner — Chief Retail Banking Officer
+      │   ├── Angela Moss — Director of Branch Operations
+      │   │   └── Sandra Osei — Branch Manager
+      │   │       └── Lucia Fernandez — Senior Personal Banker
+      │   └── Kevin Tran — Director of Consumer Lending (Philadelphia)
+      │       └── James Whitfield — Consumer Lending Analyst (Philadelphia)
+      └── Pim van Denderen — Chief Information Officer
+          ├── Drew Lewis — Sr. Director of Application Development
+          │   └── David Rodgers — Director of Application Development
+          └── Jonson Tsai — IT Director
+              ├── Jim Plunkett — IT System Administrator
+              └── Prita Khedoe — Manager IT
+
+WOW FACTOR: One prompt. Three divisions. Twenty people. All live from Entra.
+            No spreadsheet. No org chart tool. No HR system. Just ask.
+
+
+── TURN 2 — Risk Agent ─────────────────────────────────────────────────────────
+
+PROMPT:
+  Pull up the risk profile for Harbor View Private Equity.
+
+WHAT HAPPENS:
+  • Finds HARBOR VIEW PRIVATE EQUITY (client ID 9004716253)
+  • Returns:
+      Risk Rating  : HIGH ⚠️
+      Status       : UNDER REVIEW 🚨
+      Primary Exp  : $924,000,000
+      Commitment   : $3,500,000,000
+      Industry     : Private Equity — Leveraged Buyout
+      Key Risk     : Rising interest rate sensitivity, several credits
+                     approaching covenant thresholds
+
+  • Agent provides plain-English commentary:
+      "This is a significant concern — Harbor View carries a High risk rating
+       and is currently Under Review. With $3.5B in commitment and multiple
+       portfolio companies near covenant breach, this warrants immediate attention."
+
+WOW FACTOR: The AI reads structured financial data and gives you an analyst-grade
+            plain-English interpretation, not just raw numbers.
+
+
+── TURN 3 — Calendar Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  This is a red flag. I need Linda and Robert on a Teams call this afternoon
+  at 2pm. Title it "Harbor View Risk Review."
+
+WHAT HAPPENS:
+  • Immediately fetches current datetime
+  • Validates Linda Hartwell and Robert Faulkner mailboxes in parallel
+  • Checks all three calendars for 2pm availability
+  • Presents meeting summary for confirmation:
+      Subject   : Harbor View Risk Review
+      When      : Today at 2:00 PM
+      Attendees : Linda Hartwell, Robert Faulkner
+      Type      : Microsoft Teams
+  • On "confirm" → creates the Teams meeting, returns join link
+
+WOW FACTOR: COO pulls her two division chiefs into a meeting in one sentence.
+            No switching apps. No copy-pasting email addresses.
+
+
+── TURN 4 — Calendar Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  I need to set up a daily standup with the IT and App Dev leadership — Jonson,
+  Jim, Prita, Drew, and David. Every weekday at 9am, starting tomorrow. Call it
+  "AI Pilot Daily Standup."
+
+WHAT HAPPENS:
+  • Resolves all five names to mailboxes from the org directory
+  • Presents meeting summary for confirmation:
+      Subject    : AI Pilot Daily Standup
+      Recurrence : Every weekday (Mon–Fri)
+      Start date : Tomorrow
+      Time       : 9:00 AM
+      Attendees  : Jonson Tsai, Jim Plunkett, Prita Khedoe,
+                   Drew Lewis, David Rodgers
+      Type       : Microsoft Teams
+  • On "confirm" → creates the recurring Teams meeting, returns join link
+
+WOW FACTOR: Five people across two teams, recurring series, booked in one sentence.
+            The kind of thing that normally takes 10 minutes of calendar wrangling.
+
+
+── TURN 5 — Location Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  I'm planning a visit to our Philadelphia office. Find somewhere good for a
+  casual lunch near the Philadelphia Museum of Art.
+
+WHAT HAPPENS:
+  • Azure Maps real-time search — restaurant, Philadelphia Museum of Art area
+  • Returns 5–8 options with: name, address, phone number, distance
+  • Numbered list, ready to share
+
+WOW FACTOR: Azure Maps delivering live, geocoded results anchored to a landmark —
+            directly in chat. No Yelp tab. No Google Maps. Just ask.
+
+
+── TURN 6 — Location Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  Find me a cozy coffee shop in Midtown Manhattan — somewhere quiet enough
+  to have a real conversation.
+
+WHAT HAPPENS:
+  • Azure Maps real-time search — coffee shop, Midtown Manhattan
+  • Returns 5–8 options with: name, address, phone number, distance
+  • Numbered list, ready to choose from
+
+WOW FACTOR: From a casual idea to a shortlist of real venues in seconds.
+            No app-switching. No Yelp. No typing an address into Google Maps.
+
+
+── TURN 7 — Calendar Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  Book a coffee with Julie Parker tonight at 6pm. Just the two of us.
+  Call it "Catch Up — Catherine & Julie."
+
+WHAT HAPPENS:
+  • Looks up Julie Parker's mailbox from the org directory
+  • Checks both calendars for 6pm availability
+  • Presents meeting summary for confirmation:
+      Subject   : Catch Up — Catherine & Julie
+      When      : Today at 6:00 PM
+      Attendees : Julie Parker
+      Type      : In-person (no Teams link)
+  • On "confirm" → creates the calendar hold, sends invite to Julie
+
+WOW FACTOR: CEO coffee booked in one sentence. No email thread. No assistant.
+            The AI handles the who, the when, and the invite.
+
+
+── OPTIONAL CLOSER ─────────────────────────────────────────────────────────────
+
+PROMPT:
+  Who do I have in Philadelphia and what are their emails?
+
+WHAT HAPPENS:
+  • Directory Agent scans the org for city = Philadelphia
+  • Returns:
+      Kevin Tran      — Director of Consumer Lending   ketran@...
+      James Whitfield — Consumer Lending Analyst       jawhitfield@...
+  • Live from Entra — no list to maintain, no lookup needed
+
+
+================================================================================
+SCENARIO 1 AGENT SCOREBOARD
+================================================================================
+  Directory Agent  → Turn 1, Optional             Live M365 org data (3 divisions)
+  Risk Agent       → Turn 2                        Financial exposure + AI commentary
+  Calendar Agent   → Turn 3                        Urgent Teams meeting — Linda + Robert
+  Calendar Agent   → Turn 4                        Recurring standup — 5 attendees (IT + App Dev)
+  Location Agent   → Turn 5                        Azure Maps — Philly, near Art Museum
+  Location Agent   → Turn 6                        Azure Maps — cozy coffee, Midtown Manhattan
+  Calendar Agent   → Turn 7                        1:1 coffee with CEO — no Teams, in-person
+================================================================================

@@ -57,11 +57,15 @@ Based on enterprise deployment data:
 ### 🚀 Competitive Advantages
 
 #### **Multi-Agent Intelligence**
-Unlike simple chatbots, this solution employs **specialized AI agents**:
+Unlike simple chatbots, this solution employs **eight specialized AI agents**:
+- **Proxy Agent**: Intelligent routing and welcome experience
 - **Calendar Agent**: Advanced scheduling with conflict resolution
-- **Directory Agent**: Organizational intelligence and people discovery  
+- **Directory Agent**: Organizational intelligence and people discovery
 - **Location Agent**: Find nearby restaurants, hotels, meeting venues
-- **Proxy Agent**: Intelligent routing to appropriate specialists
+- **Email Agent**: Read, search, and send Microsoft 365 email
+- **Risk Agent**: Client risk profiles, financial exposure, and portfolio analysis
+- **Quality Agent**: Product feedback triage with automated COO escalation
+- **Trading Agent**: Portfolio holdings, trade history, and market data via MCP
 
 #### **Location-Aware Scheduling**
 **Unique Capability**: Integrated Azure Maps enables:
@@ -200,56 +204,191 @@ flowchart LR
 graph TB
     User[👤 User] --> API[🌐 FastAPI API Gateway]
     API --> Router[🔀 Multi-Agent Router]
-    
-    Router --> ProxyAgent[🤖 Proxy Agent<br/>Main conversation handler]
+
+    Router --> ProxyAgent[🤖 Proxy Agent<br/>Conversation & routing]
     Router --> CalendarAgent[📅 Calendar Agent<br/>Meeting & scheduling]
-    Router --> DirectoryAgent[👥 Directory Agent<br/>User & org searches]
-    Router --> LocationAgent[🗺️ Location Agent<br/>Maps & POI searches]
-    
+    Router --> DirectoryAgent[👥 Directory Agent<br/>People & org search]
+    Router --> LocationAgent[🗺️ Location Agent<br/>Maps & POI search]
+    Router --> EmailAgent[✉️ Email Agent<br/>Read, search & send mail]
+    Router --> RiskAgent[📊 Risk Agent<br/>Client risk & exposure]
+    Router --> QualityAgent[🔍 Quality Agent<br/>Feedback & escalation]
+    Router --> TradingAgent[📈 Trading Agent<br/>Portfolio & trade data]
+
     subgraph "AI Foundation"
         ProxyAgent --> SK[🧠 Semantic Kernel]
         CalendarAgent --> SK
         DirectoryAgent --> SK
         LocationAgent --> SK
+        EmailAgent --> SK
+        RiskAgent --> SK
+        QualityAgent --> SK
+        TradingAgent --> SK
         SK --> AzureOpenAI[☁️ Azure OpenAI<br/>GPT-4o, GPT-4o-mini]
     end
-    
+
     subgraph "Microsoft 365 Integration"
         CalendarAgent --> GraphPlugin[📊 Graph Plugin]
         DirectoryAgent --> GraphPlugin
+        EmailAgent --> GraphPlugin
+        QualityAgent --> GraphPlugin
         GraphPlugin --> MSGraph[📈 Microsoft Graph API]
         MSGraph --> Calendar[📅 Outlook Calendar]
-        MSGraph --> Users[� User Directory]
+        MSGraph --> Users[👤 User Directory]
+        MSGraph --> Mail[✉️ Exchange Mail]
         MSGraph --> Teams[🟢 Microsoft Teams]
     end
-    
+
     subgraph "Location Services"
-        LocationAgent --> MapsPlugin[�️ Azure Maps Plugin]
+        LocationAgent --> MapsPlugin[🗺️ Azure Maps Plugin]
         MapsPlugin --> AzureMaps[🌍 Azure Maps API]
         AzureMaps --> POI[📍 Points of Interest]
         AzureMaps --> Search[🔍 Location Search]
     end
-    
+
+    subgraph "Risk & Trading Data"
+        RiskAgent --> RiskPlugin[📊 Risk Plugin]
+        RiskPlugin --> RiskData[📄 risk_data.json]
+        TradingAgent --> MCPPlugin[🔌 MCP Plugin]
+        MCPPlugin --> TradingMCP[📈 Trading Platform MCP Server]
+    end
+
     subgraph "Data & Persistence"
         Router --> CosmosDB[🗄️ Azure CosmosDB<br/>Chat history]
         API --> Analytics[📊 LLM Analytics<br/>Cost tracking]
     end
-    
+
     subgraph "Monitoring & Observability"
-        API --> AppInsights[� Application Insights]
-        SK --> Telemetry[� OpenTelemetry]
-        Analytics --> CostMetrics[� Cost Metrics]
+        API --> AppInsights[🔭 Application Insights]
+        SK --> Telemetry[📡 OpenTelemetry]
+        Analytics --> CostMetrics[💰 Cost Metrics]
     end
 ```
 
 ### 🤖 Specialized Agents
 
-| Agent | Role | Capabilities | Plugins |
-|-------|------|-------------|---------|
-| **Proxy Agent** | Main conversation handler & task router | Welcome users, route requests, synthesize responses | Core conversation |
-| **Calendar Agent** | Meeting & scheduling specialist | Create events, check availability, book rooms, manage attendees | Microsoft Graph |
-| **Directory Agent** | Organizational intelligence | Find users, departments, managers, team structures | Microsoft Graph |
-| **Location Agent** | Location-based services | Find nearby POI, restaurants, coffee shops, directions | Azure Maps |
+| Agent | Role | Capabilities | Plugin / Data Source |
+|-------|------|-------------|----------------------|
+| **Proxy Agent** | Main conversation handler & task router | Welcome users, explain platform capabilities, handle general Q&A; no data access | None (language only) |
+| **Calendar Agent** | Meeting & scheduling specialist | Create/update/cancel events; check attendee availability; find and book conference rooms; schedule Teams or Zoom meetings; timezone-aware | Microsoft Graph |
+| **Directory Agent** | Organizational intelligence | Find users by name, email, or department; retrieve managers and direct reports; browse org hierarchy; validate mailboxes | Microsoft Graph |
+| **Location Agent** | Location-based services | Category and brand POI searches; nearby place discovery across 19+ categories; geocoding | Azure Maps |
+| **Email Agent** | Microsoft 365 email read/search/send | Search inbox with OData `$search` or `$filter`; open and display email bodies; compose and send email; multi-folder support | Microsoft Graph |
+| **Risk Agent** | Client risk & financial exposure | View risk profiles and ratings; analyse credit exposure by type; portfolio-wide risk distribution; compliance status | Risk Plugin (JSON) |
+| **Quality Agent** | Product feedback triage & escalation | Classify feedback severity; automatically email COO for Medium+ issues; structured HTML escalation emails | Microsoft Graph |
+| **Trading Agent** *(async)* | Portfolio holdings & trade data | List accounts; view positions and cost basis; retrieve event history; compute unrealized P&L; detect risk flags; insert trade events | MCP (Trading Platform) |
+
+#### Agent Detail
+
+<details>
+<summary><strong>🤖 Proxy Agent</strong> — Conversation, routing, and general Q&A</summary>
+
+The Proxy Agent is the entry point for every conversation. It has no plugins and cannot retrieve data. Its role is to welcome users, explain what the platform can do, answer general questions, and hand off to specialist agents. It provides a warm, concise interface that avoids pretending to fetch data it cannot access.
+
+**Triggers:** Greetings, platform questions, ambiguous requests, anything not covered by a specialist.
+</details>
+
+<details>
+<summary><strong>📅 Calendar Agent</strong> — Meeting scheduling and calendar management</summary>
+
+The Calendar Agent handles all aspects of calendar operations. It calls `get_current_datetime` and mailbox settings immediately on activation to ensure timezone accuracy. It validates attendee mailboxes before scheduling, respects the user's working hours, and books conference rooms when appropriate.
+
+**Meeting types:**
+- In-person / conference room → `create_calendar_event`
+- Microsoft Teams → `create_teams_meeting`
+- Zoom → `create_zoom_meeting`
+
+**Key functions:** `get_calendar_events`, `create_calendar_event`, `create_teams_meeting`, `create_zoom_meeting`, `get_all_conference_rooms`, `get_conference_room_events`, `validate_user_mailbox`, `get_current_datetime`, `get_user_mailbox_settings_by_user_id`
+
+**Triggers:** Schedule a meeting, check calendar, find a free slot, book a room, cancel or update an event.
+</details>
+
+<details>
+<summary><strong>👥 Directory Agent</strong> — People search and organizational hierarchy</summary>
+
+The Directory Agent provides full access to the Microsoft 365 user directory. It immediately calls tools without asking clarifying questions — fetching managers and direct reports in parallel where possible. When a department name doesn't match exactly, it suggests the closest match rather than dumping the full list.
+
+**Key functions:** `user_search`, `get_user_by_id`, `get_user_manager`, `get_direct_reports`, `get_all_users`, `get_users_by_department`, `get_all_departments`, `validate_user_mailbox`, `get_user_location`
+
+**Triggers:** Find a person, look up a manager, list a team, show an org chart, find users in a department.
+</details>
+
+<details>
+<summary><strong>🗺️ Location Agent</strong> — Nearby places and points of interest</summary>
+
+The Location Agent uses Azure Maps to find nearby points of interest. It maps natural-language category descriptions to the correct Azure Maps category and searches immediately without confirmation steps. It supports 19+ categories including restaurants, coffee shops, hotels, hospitals, gyms, and airports.
+
+**Key functions:** `search_nearby_locations`, `search_by_category`, `search_by_brand`, `search_by_region`, `get_available_categories`
+
+**Triggers:** Find a restaurant near X, locate a Starbucks, hotel near the conference, parking near the office.
+</details>
+
+<details>
+<summary><strong>✉️ Email Agent</strong> — Microsoft 365 email read, search, and send</summary>
+
+The Email Agent reads and sends email via Microsoft Graph. It uses OData `$search` for free-text topic searches and `$filter` for structured queries (sender, date, read status, importance, attachments) — these cannot be combined. It always fetches the list before opening a specific message and strips HTML for clean display.
+
+**Supported folders:** `inbox`, `sentitems`, `drafts`, `deleteditems`
+
+**Key functions:** `get_emails`, `get_email_body`, `send_email`
+
+**OData examples:**
+- Topic: `search="budget review"`
+- Unread: `filter_expr="isRead eq false"`
+- From sender: `filter_expr="from/emailAddress/address eq 'user@company.com'"`
+- Date range: `filter_expr="receivedDateTime ge 2026-01-01T00:00:00Z"`
+
+**Triggers:** Check my inbox, search for email about X, read that message, send an email to Y.
+</details>
+
+<details>
+<summary><strong>📊 Risk Agent</strong> — Client risk profiles and financial exposure</summary>
+
+The Risk Agent surfaces client risk data from the internal risk database. It presents risk ratings (High / Medium / Low / Watch) with context, highlights red flags such as high exposure or non-compliant status, and provides portfolio-wide distribution analysis.
+
+**Risk domains:** Derivatives, loans, bonds, repo, FX, structured products  
+**Industries covered:** Hedge funds, investment banks, insurance, municipal, REIT  
+**Compliance statuses:** Compliant / Under Review / Non-Compliant
+
+**Key functions:** `list_all_clients`, `search_clients_by_name`, `get_client_summary_by_id`, `get_client_risk_metrics`, `get_portfolio_risk_overview`
+
+**Triggers:** Show me the risk profile for client X, which clients are high risk, total derivatives exposure, portfolio risk overview.
+</details>
+
+<details>
+<summary><strong>🔍 Quality Agent</strong> — Product feedback triage and COO escalation</summary>
+
+The Quality Agent accepts raw product feedback, classifies it by severity, and automatically emails the COO (Catherine Brooks) for any issue rated Medium or higher. It composes a structured HTML email including a severity/area/summary table, the verbatim user feedback, and a suggested next step.
+
+**Severity levels:**
+- `CRITICAL` — data loss, security breach, outage → email COO
+- `HIGH` — core feature failure, no workaround → email COO
+- `MEDIUM` — noticeable problem, workaround exists → email COO
+- `LOW` — cosmetic / minor → log only, no email
+- `INFORMATIONAL` — positive feedback / feature request → acknowledge only
+
+**Key function:** `send_email` (escalation to COO)
+
+**Triggers:** Report a bug, flag a quality issue, submit product feedback.
+</details>
+
+<details>
+<summary><strong>📈 Trading Agent</strong> — Portfolio holdings and trade ledger (MCP)</summary>
+
+The Trading Agent connects to the Trading Platform MCP server via `MCPStreamableHttpPlugin`, which discovers tools dynamically at startup. It is the only **async** factory in the agent suite because it must `await plugin.connect()` before tools are available.
+
+All data comes exclusively from MCP tool calls — the agent never invents prices, positions, or timestamps. It enforces strict sentinel codes: `INSUFFICIENT_DATA` when information is missing and `DATA_INCONSISTENCY: oversell` when a SELL would produce negative shares.
+
+**Event types:** `BUY` (increases position), `SELL` (decreases position), `PRICE` (market observation only — does not change share count)
+
+**MCP tools (camelCase, auto-discovered):** `listAccounts`, `portfolioSummary`, `getAllPortfolioSummaries`, `latestPrice`, `tradeHistory`, `accountEvents`, `getAccountTickerEvents`, `tickerEvents`, `runQuery`, `getAccountAnalysisContext`, `insertEvent`, `agentStatus`
+
+**Risk flags detected:** `CONCENTRATION_RISK: sector` (>60% in one sector), `CONCENTRATION_RISK: small_cap`, `STALE_PRICE` (last price event >30 days), `MISSING_PRICE` (no PRICE events), `DATA_INCONSISTENCY: oversell`, `HIGH_CHURN` (>1.5 trades/week)
+
+**MCP Server:** `https://ai-learning-apim.azure-api.net/trading-platform-mcp-server/mcp`  
+**Auth:** Optional `Ocp-Apim-Subscription-Key` via `TRADING_MCP_APIM_KEY` or `TRADING_MCP_API_KEY` env vars
+
+**Triggers:** Show my portfolio, account positions, trade history, latest price for MSFT, insert a buy order, scan for at-risk accounts.
+</details>
 
 ## 🔌 Plugin Architecture
 

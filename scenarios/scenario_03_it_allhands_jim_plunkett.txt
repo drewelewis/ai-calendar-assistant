@@ -1,0 +1,144 @@
+================================================================================
+DEMO SCENARIO 3 — "IT All-Hands: Distributed Team, One Chat"
+================================================================================
+PERSONA : Jim Plunkett | IT System Administrator
+USER ID : 69149650-b87e-44cf-9413-db5c1a5b6d3f
+LOGIN   : jiplunkett@MngEnvMCAP623732.onmicrosoft.com
+PASSWORD: ⚠️  Existing account — password set before provisioning.
+          Reset via Entra admin portal if needed:
+          https://entra.microsoft.com → Users → Jim Plunkett → Reset password
+
+STORY   : Jim manages IT operations for a team spread across New York, Boston,
+          Philadelphia, and Hartford. A vendor just contacted him about a 
+          critical patch window tonight. He needs to know who's where, loop in 
+          the right people fast, check on a client's tech-risk exposure, and 
+          pin down a venue for the quarterly IT offsite he's been putting off.
+          All in one chat. All without leaving Teams.
+
+EXPECTED TOTAL TIME: ~6–8 minutes
+================================================================================
+
+
+── TURN 1 — Directory Agent ────────────────────────────────────────────────────
+
+PROMPT:
+  Who's on the IT team and where are they all based?
+
+WHAT HAPPENS:
+  • Fetches all users in the Information Technology department
+  • Returns full list with city/location:
+
+      Jonson Tsai         — IT Director              | New York, NY
+      Prita Khedoe        — Manager IT               | New York, NY
+      Jim Plunkett        — IT System Administrator  | New York, NY
+      Cal Johnson         — Site Reliability Engineer| New York, NY
+      Jake LaMotta        — IT Architect             | Boston, MA
+      Jason Moy           — IT Architect             | New York, NY
+      Mary Smith          — IT Architect             | Philadelphia, PA
+      Ravi Penmetsa       — Sr IT Advisor            | Hartford, CT
+
+WOW FACTOR: 8 people. 4 cities. Pulled instantly from live Entra data.
+            Jim now knows exactly who's where — without emailing anyone.
+
+
+── TURN 2 — Calendar Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  I need an emergency patch coordination call tonight at 7pm with Cal Johnson,
+  Jake LaMotta, and Ravi Penmetsa. Teams meeting. Call it 
+  "Critical Patch Window Coordination."
+
+WHAT HAPPENS:
+  • Fetches current datetime
+  • Validates Cal Johnson, Jake LaMotta, Ravi Penmetsa mailboxes in parallel
+  • Checks all calendars for 7pm tonight
+  • Presents confirmation:
+      Subject   : Critical Patch Window Coordination
+      When      : Tonight at 7:00 PM
+      Attendees : Cal Johnson, Jake LaMotta, Ravi Penmetsa
+      Type      : Microsoft Teams
+  • On confirm → creates meeting, returns join link
+
+WOW FACTOR: Three people across three cities. One sentence. Meeting booked.
+            Jim pastes the join link into the vendor email and he's done.
+
+
+── TURN 3 — Risk Agent ─────────────────────────────────────────────────────────
+
+PROMPT:
+  The vendor mentioned this patch affects systems used in algorithmic trading.  
+  Do we have any clients with heavy tech exposure?
+
+WHAT HAPPENS:
+  • Risk Agent scans portfolio for technology-sector clients
+  • Surfaces QUANTUM HEDGE STRATEGIES:
+      Risk Rating  : MEDIUM
+      Industry     : Hedge Fund — Quantitative (Algorithmic Trading)
+      Primary Exp  : $89,456,700
+      Commitment   : $750,000,000
+      Key Risk     : Machine learning-based alpha generation, technology and 
+                     financial sector equity concentration
+
+  • Agent: "Quantum Hedge Strategies runs ML-based algorithmic trading systems.
+            If tonight's patch affects trading infrastructure, they're your 
+            highest-priority client to monitor. Their $750M commitment and 
+            quant-heavy operations make any system disruption material."
+
+WOW FACTOR: Jim asked a business question, not a data query.
+            The AI connected the dots between a patch and a financial client risk.
+
+
+── TURN 4 — Calendar Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  Loop in Jonson Tsai on the 7pm call too. And add a note to the meeting body:
+  "Quantum Hedge trading systems may be impacted — monitor post-patch."
+
+WHAT HAPPENS:
+  • Updates the existing meeting to add Jonson Tsai as attendee
+  • Updates the meeting body with the Quantum note
+  • Confirms updated attendee list and returns fresh join link
+
+WOW FACTOR: Mid-stream meeting update. No calendar app opened. Just told it.
+
+
+── TURN 5 — Location Agent ─────────────────────────────────────────────────────
+
+PROMPT:
+  We've been trying to plan an IT team offsite in Boston for ages.
+  Find me a hotel near the Financial District in Boston.
+
+WHAT HAPPENS:
+  • Azure Maps real-time search — hotel, Boston Financial District
+  • Returns 5–8 options with: name, address, phone number, distance from center
+  • Numbered list, ready to forward
+
+WOW FACTOR: Zero context switch. Went from emergency patch management to
+            offsite planning in the same conversation window.
+
+
+── TURN 6 — Calendar Agent (optional closer) ───────────────────────────────────
+
+PROMPT:
+  Book a full IT team meeting for the first Monday in March at 10am.
+  Call it "Q1 IT Offsite Planning Kickoff." Invite everyone on the IT team.
+
+WHAT HAPPENS:
+  • Looks up all IT department members (from Turn 1 context)
+  • Validates mailboxes for all 8 team members
+  • Books Teams meeting: "Q1 IT Offsite Planning Kickoff"
+  • Monday March 2, 10:00 AM — full team on the invite
+  • Returns join link
+
+WOW FACTOR: "Everyone on the IT team" — no list, no emails, no BCC.
+            The AI knew who that was from earlier in the same conversation.
+
+
+================================================================================
+SCENARIO 3 AGENT SCOREBOARD
+================================================================================
+  Directory Agent  → Turn 1                        Live IT team roster across 4 cities
+  Calendar Agent   → Turn 2, Turn 4, Turn 6        Emergency call, update, full team invite
+  Risk Agent       → Turn 3                        Quantum tech-sector risk connection
+  Location Agent   → Turn 5                        Boston hotel search for offsite
+================================================================================

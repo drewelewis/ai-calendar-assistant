@@ -2273,7 +2273,212 @@ class GraphOperations:
             print("Full traceback:")
             traceback.print_exc()
             return []
-      
+
+    async def get_emails(
+        self,
+        user_id: str,
+        folder: str = "inbox",
+        search: str = None,
+        filter_expr: str = None,
+        max_results: int = 10,
+    ) -> List[dict]:
+        """
+        Retrieve emails for a user from a mail folder via Microsoft Graph.
+
+        Args:
+            user_id: UPN or GUID of the mailbox owner.
+            folder: Mail folder name — 'inbox', 'sentitems', 'drafts', 'deleteditems', or
+                    a well-known folder ID. Defaults to 'inbox'.
+            search: OData $search free-text string (cannot be combined with filter_expr).
+                    Example: '"harbor view"' or 'from:cfo subject:stress'
+            filter_expr: OData $filter expression. Example: 'isRead eq false'
+                    NOTE: $search and $filter are mutually exclusive in Graph — if both
+                    are supplied, $search takes precedence.
+            max_results: Maximum number of messages to return (default: 10, max: 50).
+
+        Returns:
+            List of dicts with keys: id, subject, from_name, from_address,
+            received, body_preview, is_read, importance, has_attachments.
+        """
+        try:
+            from msgraph.generated.users.item.mail_folders.item.messages.messages_request_builder import (
+                MessagesRequestBuilder,
+            )
+
+            console_info(f"Fetching emails for {user_id} — folder={folder} search={search} filter={filter_expr}", "GraphOps")
+
+            max_results = min(max_results, 50)  # cap
+            select_fields = [
+                "id", "subject", "from", "receivedDateTime",
+                "bodyPreview", "isRead", "importance", "hasAttachments", "conversationId",
+            ]
+
+            query_params = MessagesRequestBuilder.MessagesRequestBuilderGetQueryParameters(
+                select=select_fields,
+                top=max_results,
+                orderby=["receivedDateTime desc"],
+            )
+
+            # $search and $filter are mutually exclusive
+            if search:
+                # Graph $search requires the string wrapped in quotes
+                query_params.search = f'"{search}"' if not search.startswith('"') else search
+            elif filter_expr:
+                query_params.filter = filter_expr
+
+            request_config = MessagesRequestBuilder.MessagesRequestBuilderGetRequestConfiguration(
+                query_parameters=query_params
+            )
+
+            response = await (
+                self._get_client()
+                .users.by_user_id(user_id)
+                .mail_folders.by_mail_folder_id(folder)
+                .messages.get(request_configuration=request_config)
+            )
+
+            if not response or not response.value:
+                return []
+
+            result = []
+            for msg in response.value:
+                from_name = ""
+                from_address = ""
+                if msg.from_ and msg.from_.email_address:
+                    from_name = msg.from_.email_address.name or ""
+                    from_address = msg.from_.email_address.address or ""
+
+                result.append({
+                    "id": msg.id,
+                    "subject": msg.subject or "(no subject)",
+                    "from_name": from_name,
+                    "from_address": from_address,
+                    "received": msg.received_date_time.isoformat() if msg.received_date_time else "",
+                    "body_preview": msg.body_preview or "",
+                    "is_read": msg.is_read,
+                    "importance": str(msg.importance) if msg.importance else "normal",
+                    "has_attachments": msg.has_attachments or False,
+                    "conversation_id": msg.conversation_id or "",
+                })
+
+            console_info(f"Retrieved {len(result)} emails from {folder}", "GraphOps")
+            return result
+
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_emails: {e}")
+            traceback.print_exc()
+            return []
+
+    async def get_email_body(self, user_id: str, message_id: str) -> dict:
+        """
+        Retrieve the full body of a specific email message.
+
+        Args:
+            user_id: UPN or GUID of the mailbox owner.
+            message_id: The Graph message ID (from get_emails result).
+
+        Returns:
+            Dict with keys: id, subject, from_name, from_address, received,
+            body_content, body_type, is_read, importance.
+        """
+        try:
+            console_info(f"Fetching email body for message {self._format_event_id(message_id)}", "GraphOps")
+
+            msg = await (
+                self._get_client()
+                .users.by_user_id(user_id)
+                .messages.by_message_id(message_id)
+                .get()
+            )
+
+            if not msg:
+                return {"error": "Message not found"}
+
+            from_name = ""
+            from_address = ""
+            if msg.from_ and msg.from_.email_address:
+                from_name = msg.from_.email_address.name or ""
+                from_address = msg.from_.email_address.address or ""
+
+            body_content = ""
+            body_type = "text"
+            if msg.body:
+                body_content = msg.body.content or ""
+                body_type = str(msg.body.content_type) if msg.body.content_type else "text"
+
+            return {
+                "id": msg.id,
+                "subject": msg.subject or "(no subject)",
+                "from_name": from_name,
+                "from_address": from_address,
+                "received": msg.received_date_time.isoformat() if msg.received_date_time else "",
+                "body_content": body_content,
+                "body_type": body_type,
+                "is_read": msg.is_read,
+                "importance": str(msg.importance) if msg.importance else "normal",
+            }
+
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.get_email_body: {e}")
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def send_email(self, sender_id: str, to_address: str, subject: str, body: str, body_type: str = "HTML") -> dict:
+        """
+        Send an email on behalf of a user via Microsoft Graph.
+
+        Args:
+            sender_id: The user ID or UPN of the sending user (the logged-in session user).
+            to_address: Recipient email address.
+            subject: Email subject line.
+            body: Email body content.
+            body_type: "HTML" (default) or "Text".
+
+        Returns:
+            dict with keys 'status' ("sent" or "error"), 'to', 'subject', and optionally 'error'.
+        """
+        try:
+            from msgraph.generated.models.message import Message
+            from msgraph.generated.models.recipient import Recipient
+            from msgraph.generated.users.item.send_mail.send_mail_post_request_body import SendMailPostRequestBody
+
+            console_info(f"Sending email from {sender_id} to {to_address}: {subject}", "GraphOps")
+            console_telemetry_event("email_send_start", {
+                "sender_id": sender_id,
+                "to_address": to_address,
+                "subject": subject,
+            }, "GraphOps")
+
+            recipient = Recipient()
+            recipient.email_address = EmailAddress(address=to_address)
+
+            msg = Message()
+            msg.subject = subject
+            msg.body = ItemBody(
+                content_type=BodyType.Html if body_type.upper() == "HTML" else BodyType.Text,
+                content=body,
+            )
+            msg.to_recipients = [recipient]
+
+            request_body = SendMailPostRequestBody()
+            request_body.message = msg
+            request_body.save_to_sent_items = True
+
+            await self._get_client().users.by_user_id(sender_id).send_mail.post(request_body)
+
+            console_info(f"Email sent successfully to {to_address}", "GraphOps")
+            console_telemetry_event("email_send_success", {
+                "sender_id": sender_id,
+                "to_address": to_address,
+                "subject": subject,
+            }, "GraphOps")
+            return {"status": "sent", "to": to_address, "subject": subject}
+
+        except Exception as e:
+            print(f"An error occurred with GraphOperations.send_email: {e}")
+            traceback.print_exc()
+            return {"status": "error", "error": str(e)}
+
 # # Example usage:
 
 async def main():
