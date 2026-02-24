@@ -1507,6 +1507,20 @@ class GraphOperations:
     async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, recurrence: dict = None) -> Event:
         try:
             console_info(f"Creating calendar event: {subject} for user {user_id}", "GraphOps")
+
+            # Validate datetimes before hitting Graph API — catches impossible dates
+            # like Feb 29 in non-leap years before we get a cryptic 400 back.
+            from datetime import datetime as _dt_validate
+            for _label, _dt_str in (("start", start), ("end", end)):
+                try:
+                    _dt_validate.fromisoformat(_dt_str.replace("Z", "+00:00"))
+                except ValueError as _ve:
+                    raise ValueError(
+                        f"Invalid {_label} date '{_dt_str}': {_ve}. "
+                        "Please verify the date exists (e.g. February 2026 has "
+                        "28 days — 2026 is not a leap year)."
+                    )
+
             console_telemetry_event("calendar_event_create_start", {
                 "user_id": user_id,
                 "subject": subject,
@@ -1831,7 +1845,19 @@ class GraphOperations:
         """
         try:
             console_info(f"Creating Teams meeting: '{subject}' for user {user_id}", "GraphOps")
-            
+
+            # Validate datetimes before hitting Graph API — catches impossible dates
+            from datetime import datetime as _dt_validate
+            for _label, _dt_str in (("start", start), ("end", end)):
+                try:
+                    _dt_validate.fromisoformat(_dt_str.replace("Z", "+00:00"))
+                except ValueError as _ve:
+                    raise ValueError(
+                        f"Invalid {_label} date '{_dt_str}': {_ve}. "
+                        "Please verify the date exists (e.g. February 2026 has "
+                        "28 days — 2026 is not a leap year)."
+                    )
+
             # Create Teams meeting using the Graph API with proper error handling
             online_meeting = OnlineMeeting(
                 subject=subject,
