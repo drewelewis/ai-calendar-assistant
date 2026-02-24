@@ -1,5 +1,4 @@
 # Copyright (c) Microsoft. All rights reserved.
-import datetime
 
 from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
@@ -42,7 +41,6 @@ RESPONSE STYLE:
 - Do not fabricate facts or access data you don't have tools for
 
 Session ID: {session_id}
-Current Time: {datetime.datetime.now().isoformat()}
 """.strip()
 
     return ChatCompletionAgent(
