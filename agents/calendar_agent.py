@@ -101,13 +101,21 @@ AVAILABLE FUNCTIONS:
 - get_current_datetime: Get the current date and time (use this before any date calculations)
 - get_user_mailbox_settings_by_user_id: Get timezone and working hours
 
-RECURRENCE — pass as JSON string in the `recurrence` parameter:
-- Every weekday:  {{"type":"weekly","interval":1,"days_of_week":["monday","tuesday","wednesday","thursday","friday"],"end_type":"noEnd"}}
-- Daily:          {{"type":"daily","interval":1,"end_type":"noEnd"}}
-- Every 2 weeks:  {{"type":"weekly","interval":2,"days_of_week":["monday"],"end_type":"noEnd"}}
-- Until a date:   add "end_type":"endDate","end_date":"YYYY-MM-DD"
-- N occurrences:  add "end_type":"numbered","occurrences":10
-- Always include "start_date":"YYYY-MM-DD" set to the first occurrence date
+RECURRENCE — use these flat parameters (no JSON, no braces):
+- recurrence_type: daily, weekly, or absoluteMonthly
+- recurrence_interval: 1 (every), 2 (every other), etc.
+- recurrence_days: comma-separated days for weekly — e.g. monday,tuesday,wednesday,thursday,friday
+- recurrence_end_type: noEnd (forever), endDate (use recurrence_end_date), numbered (use recurrence_occurrences)
+- recurrence_end_date: YYYY-MM-DD — required when recurrence_end_type=endDate
+- recurrence_occurrences: integer — required when recurrence_end_type=numbered
+- recurrence_start_date: YYYY-MM-DD — always set to the date of the first occurrence
+
+Examples:
+  Every weekday forever:   recurrence_type=weekly, recurrence_interval=1, recurrence_days=monday,tuesday,wednesday,thursday,friday, recurrence_end_type=noEnd, recurrence_start_date=YYYY-MM-DD
+  Daily forever:           recurrence_type=daily, recurrence_interval=1, recurrence_end_type=noEnd, recurrence_start_date=YYYY-MM-DD
+  Every 2 weeks (Monday):  recurrence_type=weekly, recurrence_interval=2, recurrence_days=monday, recurrence_end_type=noEnd, recurrence_start_date=YYYY-MM-DD
+  Until a date:            recurrence_end_type=endDate, recurrence_end_date=2026-06-30
+  Fixed occurrences:       recurrence_end_type=numbered, recurrence_occurrences=10
 
 SCHEDULING WORKFLOW:
 1. Call get_current_datetime + get_user_mailbox_settings_by_user_id in parallel immediately.

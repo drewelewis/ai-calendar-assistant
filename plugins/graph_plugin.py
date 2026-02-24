@@ -1086,9 +1086,12 @@ class GraphPlugin:
         NOTE: Organizer must have calendar creation permissions
         """
     )
-    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, recurrence: Annotated[str, 'Optional JSON string for recurring events. Fields: type (daily/weekly/absoluteMonthly), interval (int), days_of_week (list, weekly only), end_type (noEnd/endDate/numbered), end_date (YYYY-MM-DD for endDate), occurrences (int for numbered), start_date (YYYY-MM-DD, first occurrence date, required)'] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
+    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, recurrence_type: Annotated[str, "Optional. Recurrence pattern type: daily, weekly, or absoluteMonthly. Omit for non-recurring events."] = None, recurrence_interval: Annotated[int, "Optional. How often the pattern repeats: 1 means every week/day/month, 2 means every other, etc."] = None, recurrence_days: Annotated[str, "Optional. For weekly recurrence only — comma-separated days: monday, tuesday, wednesday, thursday, friday, saturday, sunday."] = None, recurrence_end_type: Annotated[str, "Optional. How the recurrence ends: noEnd (runs forever), endDate (stops on a date), numbered (fixed number of occurrences)."] = None, recurrence_end_date: Annotated[str, "Optional. Required when recurrence_end_type is endDate. End date in YYYY-MM-DD format."] = None, recurrence_occurrences: Annotated[int, "Optional. Required when recurrence_end_type is numbered. Total number of occurrences."] = None, recurrence_start_date: Annotated[str, "Optional. The date of the very first occurrence in YYYY-MM-DD format. Required when any recurrence field is set."] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
         self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end,
-                              location=location, body=body, attendees=attendees, optional_attendees=optional_attendees, recurrence=recurrence)
+                              location=location, body=body, attendees=attendees, optional_attendees=optional_attendees,
+                              recurrence_type=recurrence_type, recurrence_interval=recurrence_interval, recurrence_days=recurrence_days,
+                              recurrence_end_type=recurrence_end_type, recurrence_end_date=recurrence_end_date,
+                              recurrence_occurrences=recurrence_occurrences, recurrence_start_date=recurrence_start_date)
         self._send_friendly_notification("✨ Creating new calendar event and sending invitations...")
         
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
@@ -1097,12 +1100,20 @@ class GraphPlugin:
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
 
         recurrence_dict = None
-        if recurrence:
-            import json
-            try:
-                recurrence_dict = json.loads(recurrence)
-            except Exception:
-                pass
+        if recurrence_type:
+            recurrence_dict = {
+                "type": recurrence_type,
+                "interval": recurrence_interval or 1,
+                "end_type": recurrence_end_type or "noEnd",
+            }
+            if recurrence_days:
+                recurrence_dict["days_of_week"] = [d.strip().lower() for d in recurrence_days.split(",") if d.strip()]
+            if recurrence_end_date:
+                recurrence_dict["end_date"] = recurrence_end_date
+            if recurrence_occurrences:
+                recurrence_dict["occurrences"] = recurrence_occurrences
+            if recurrence_start_date:
+                recurrence_dict["start_date"] = recurrence_start_date
         
         try:
             result = await graph_operations.create_calendar_event(
@@ -1178,9 +1189,12 @@ class GraphPlugin:
         NOTE: Organizer must have Teams and Exchange Online licenses
         """
     )
-    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None, recurrence: Annotated[str, 'Optional JSON string for recurring meetings. Fields: type (daily/weekly/absoluteMonthly), interval (int), days_of_week (list, weekly only), end_type (noEnd/endDate/numbered), end_date (YYYY-MM-DD for endDate), occurrences (int for numbered), start_date (YYYY-MM-DD, first occurrence date, required)'] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
+    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None, recurrence_type: Annotated[str, "Optional. Recurrence pattern type: daily, weekly, or absoluteMonthly. Omit for non-recurring meetings."] = None, recurrence_interval: Annotated[int, "Optional. How often the pattern repeats: 1 means every week/day/month, 2 means every other, etc."] = None, recurrence_days: Annotated[str, "Optional. For weekly recurrence only — comma-separated days: monday, tuesday, wednesday, thursday, friday, saturday, sunday."] = None, recurrence_end_type: Annotated[str, "Optional. How the recurrence ends: noEnd (runs forever), endDate (stops on a date), numbered (fixed number of occurrences)."] = None, recurrence_end_date: Annotated[str, "Optional. Required when recurrence_end_type is endDate. End date in YYYY-MM-DD format."] = None, recurrence_occurrences: Annotated[int, "Optional. Required when recurrence_end_type is numbered. Total number of occurrences."] = None, recurrence_start_date: Annotated[str, "Optional. The date of the very first occurrence in YYYY-MM-DD format. Required when any recurrence field is set."] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
         self._log_function_call("create_teams_meeting", user_id=user_id, subject=subject, start=start, end=end,
-                              body=body, attendees=attendees, optional_attendees=optional_attendees, location=location, recurrence=recurrence)
+                              body=body, attendees=attendees, optional_attendees=optional_attendees, location=location,
+                              recurrence_type=recurrence_type, recurrence_interval=recurrence_interval, recurrence_days=recurrence_days,
+                              recurrence_end_type=recurrence_end_type, recurrence_end_date=recurrence_end_date,
+                              recurrence_occurrences=recurrence_occurrences, recurrence_start_date=recurrence_start_date)
         self._send_friendly_notification("🎥 Creating Microsoft Teams meeting with video conference link...")
         
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
@@ -1189,12 +1203,20 @@ class GraphPlugin:
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
 
         recurrence_dict = None
-        if recurrence:
-            import json
-            try:
-                recurrence_dict = json.loads(recurrence)
-            except Exception:
-                pass
+        if recurrence_type:
+            recurrence_dict = {
+                "type": recurrence_type,
+                "interval": recurrence_interval or 1,
+                "end_type": recurrence_end_type or "noEnd",
+            }
+            if recurrence_days:
+                recurrence_dict["days_of_week"] = [d.strip().lower() for d in recurrence_days.split(",") if d.strip()]
+            if recurrence_end_date:
+                recurrence_dict["end_date"] = recurrence_end_date
+            if recurrence_occurrences:
+                recurrence_dict["occurrences"] = recurrence_occurrences
+            if recurrence_start_date:
+                recurrence_dict["start_date"] = recurrence_start_date
         
         try:
             result = await graph_operations.create_calendar_event_with_teams(
