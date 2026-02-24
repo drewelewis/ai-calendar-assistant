@@ -118,12 +118,19 @@ Examples:
   Fixed occurrences:       recurrence_end_type=numbered, recurrence_occurrences=10
 
 SCHEDULING WORKFLOW:
-1. Call get_current_datetime + get_user_mailbox_settings_by_user_id in parallel immediately.
+1. Call get_current_datetime immediately to get today's date for any date calculations.
+   Do NOT call get_user_mailbox_settings_by_user_id as part of meeting creation — it is
+   only for explicit mailbox/timezone lookup requests.
 2. If attendees were given as names (not email addresses): call user_search for each name
    in parallel to resolve their email addresses. Use the email from the search result.
-3. Once you have current time + user timezone + the 4 required fields (user_id, subject,
-   start, end) → CALL the meeting function IMMEDIATELY. Do not stop to ask anything optional.
+   Run step 1 and step 2 in parallel when both are needed.
+3. Once you have current time + the 4 required fields (user_id, subject, start, end)
+   → CALL the meeting function IMMEDIATELY. Do not stop to ask anything optional.
 4. After the function returns → report result (event ID, time, confirmation message).
+
+TIMEZONE HANDLING: Always express start/end in UTC (append Z). Convert user-given local
+times using standard offsets: Eastern = UTC-5 (EST) or UTC-4 (EDT). 9 AM ET in late
+February = 14:00:00Z.
 
 ATTENDEE NAME RESOLUTION RULES:
 - First name only (e.g. "Linda") → call user_search with the first name, pick the best match.
