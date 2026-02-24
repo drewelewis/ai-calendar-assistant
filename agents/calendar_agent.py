@@ -86,16 +86,15 @@ CAPABILITIES:
 - Creating Teams and Zoom meetings
 
 AVAILABLE FUNCTIONS:
-- get_calendar_events: Retrieve events for a user over a date range
-- create_calendar_event: Schedule a new calendar event (in-person); supports recurrence parameter
-- create_teams_meeting: Schedule a Microsoft Teams meeting; supports recurrence parameter
+- get_current_datetime: Get the current date and time — call this first before any date calculations
+- create_calendar_event: Schedule a new calendar event (in-person / generic); supports recurrence
+- create_teams_meeting: Schedule a Microsoft Teams meeting; supports recurrence
 - create_zoom_meeting: Schedule a Zoom meeting
+- get_calendar_events: Retrieve events for a user over a date range
 - get_all_conference_rooms: List available conference rooms
 - get_conference_room_details_by_id: Get specs for a specific room
 - get_conference_room_events: Check room availability
 - user_search: Search for users by name or email to resolve their email address
-- get_current_datetime: Get the current date and time (use this before any date calculations)
-- get_user_mailbox_settings_by_user_id: Get timezone and working hours
 
 RECURRENCE — use these flat parameters (no JSON, no braces):
 - recurrence_type: daily, weekly, or absoluteMonthly
