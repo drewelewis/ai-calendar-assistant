@@ -350,10 +350,11 @@ class AzureMapsPlugin:
             
             search_client = await self._get_search_client()
             
-            # Build a human-readable query from the requested categories (drives text matching on /search/poi/json)
-            query_text = " OR ".join(
-                cat.replace("_", " ") for cat in category_list if cat in category_mapping
-            ) or "place"
+            # Use the primary (first) category name as the text query.
+            # Azure Maps /search/poi/json does NOT support OR-style multi-term queries;
+            # category filtering is handled by categorySet, not query text.
+            primary_cat = next((c for c in category_list if c in category_mapping), category_list[0])
+            query_text = primary_cat.replace("_", " ")
             
             # Perform the categorized search via /search/poi/json
             results = await search_client.search_nearby(
