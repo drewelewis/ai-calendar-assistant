@@ -563,16 +563,19 @@ class AzureMapsOperations:
                            longitude: float, 
                            radius: int = 10, 
                            limit: int = 20, 
+                           query: str = "place",
                            category_set: Optional[List[int]] = None,
                            brand_set: Optional[List[str]] = None,
                            country_set: Optional[List[str]] = None,
                            language: str = "en-US") -> Dict[str, Any]:
-        """Search nearby POIs with fast execution."""
-        console_info(f"🔍 Searching near {latitude}, {longitude} within {radius}m...", "AzureMaps")
+        """Search POIs using /search/poi/json (text + optional categorySet filter)."""
+        console_info(f"🔍 Searching for '{query}' near {latitude}, {longitude} within {radius}m...", "AzureMaps")
         
-        # Setup authentication and parameters
+        # Use /search/poi/json — supports both free-text query AND categorySet filtering
+        # /search/nearby/json does not reliably honour categorySet
         params = {
             "api-version": "1.0",
+            "query": query,
             "lat": latitude,
             "lon": longitude,
             "radius": radius,
@@ -610,37 +613,42 @@ class AzureMapsOperations:
         if not self.session:
             self.session = aiohttp.ClientSession()
 
-        url = f"{self.base_url}/search/nearby/json"
+        url = f"{self.base_url}/search/poi/json"
 
         async with self.session.get(url, headers=headers, params=params) as response:
             if response.status == 200:
                 result = await response.json()
                 num_results = len(result.get("results", []))
-                console_info(f"Found {num_results} nearby POIs", "AzureMaps")
+                console_info(f"Found {num_results} POI results for '{query}'", "AzureMaps")
                 return result
             else:
-                console_error(f"Nearby search failed: {response.status}", "AzureMaps")
-                raise Exception(f"Nearby search failed: {response.status}")
+                error_text = await response.text()
+                console_error(f"POI search failed: {response.status} — {error_text[:200]}", "AzureMaps")
+                raise Exception(f"POI search failed: {response.status}")
             
     @trace_async_method("geolocate_city_state")
-    async def geolocate_city_state(self, city: str, state: str) -> Optional[Dict[str, Any]]:
+    async def geolocate_city_state(self, city: str, state: str, neighborhood: str = None) -> Optional[Dict[str, Any]]:
         """
-        Geolocate a city and state to get coordinates and location details.
+        Geolocate a city/neighborhood and state to get coordinates.
         
         Args:
-            city (str): The city name to geolocate
-            state (str): The state name to geolocate
+            city (str): The city name (may include neighborhood, e.g. 'Midtown Manhattan, New York')
+            state (str): The state name or abbreviation
+            neighborhood (str): Optional neighborhood/district for more precise geocoding
             
         Returns:
             Optional[Dict[str, Any]]: Geolocation result with coordinates and details, or None if failed
         """
-        console_info(f"🗺️ Looking up coordinates for {city}, {state}...", "AzureMaps")
+        # Build the most specific query possible
+        if neighborhood:
+            query = f"{neighborhood}, {city}, {state}"
+        else:
+            query = f"{city}, {state}"
+        console_info(f"🗺️ Looking up coordinates for {query}...", "AzureMaps")
 
-        # Setup authentication and parameters for search geocoding
-        # Use the search/address/json endpoint instead of search/geocode/json
         params = {
             "api-version": "1.0",
-            "query": f"{city}, {state}",  # Combined query format
+            "query": query,
             "limit": 1,  # Only need the best match
             "countrySet": "US"  # Limit to US for state searches
         }

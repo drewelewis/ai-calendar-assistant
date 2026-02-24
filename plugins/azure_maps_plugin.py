@@ -163,6 +163,7 @@ class AzureMapsPlugin:
                 longitude=longitude,
                 radius=radius,
                 limit=limit,
+                query="point of interest",
                 language=language
             )
             
@@ -349,12 +350,18 @@ class AzureMapsPlugin:
             
             search_client = await self._get_search_client()
             
-            # Perform the categorized search
+            # Build a human-readable query from the requested categories (drives text matching on /search/poi/json)
+            query_text = " OR ".join(
+                cat.replace("_", " ") for cat in category_list if cat in category_mapping
+            ) or "place"
+            
+            # Perform the categorized search via /search/poi/json
             results = await search_client.search_nearby(
                 latitude=latitude,
                 longitude=longitude,
                 radius=radius,
                 limit=limit,
+                query=query_text,
                 category_set=category_ids,
                 language=language
             )
@@ -851,8 +858,9 @@ class AzureMapsPlugin:
         """
     )
     async def geolocate_city_state(self,
-                                   city: Annotated[str, "City name (e.g., 'Seattle', 'Austin', 'Portland')"],
-                                   state: Annotated[str, "State name or abbreviation (e.g., 'WA', 'Washington', 'TX', 'Texas')"]) -> str:
+                                   city: Annotated[str, "City name or 'Neighborhood, City' (e.g., 'Midtown Manhattan, New York', 'Downtown Seattle', 'Austin')"],
+                                   state: Annotated[str, "State name or abbreviation (e.g., 'WA', 'Washington', 'TX', 'Texas')"],
+                                   neighborhood: Annotated[str, "Optional specific neighborhood or district for more precise coordinates (e.g., 'Midtown Manhattan', 'SoHo', 'Capitol Hill')"] = None) -> str:
         """
         Get geographical coordinates and location details for a city and state.
         
@@ -866,8 +874,8 @@ class AzureMapsPlugin:
             # Notify user we're looking up the location
             self._send_friendly_notification(f"🗺️ Looking up coordinates for {city}, {state}...")
             
-            # Perform the geocoding search
-            result = await search_client.geolocate_city_state(city, state)
+            # Perform the geocoding search — pass neighborhood for precision
+            result = await search_client.geolocate_city_state(city, state, neighborhood=neighborhood)
             
             if not result or 'features' not in result:
                 return f"Could not find location information for {city}, {state}. Please check the spelling and try again."
