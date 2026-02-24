@@ -106,7 +106,7 @@ Agent commentary: *"This is a significant concern — Harbor View carries a High
 
 ### Turn 3 — Calendar Agent
 
-> **Prompt:** *"This is a red flag. I need Linda and Robert on a Teams call this afternoon at 2pm. Title it 'Harbor View Risk Review.'"*
+> **Prompt:** *"This is a red flag. I need Linda and Robert on a Teams call this afternoon at 2pm. Title it 'Harbor View Risk Review.'", for the body of the email, include the risk data and add a professional summary at the top.*
 
 **What happens:**
 - Immediately fetches current datetime

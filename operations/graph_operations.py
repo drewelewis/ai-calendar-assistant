@@ -324,6 +324,8 @@ class GraphOperations:
             type=pattern_type,
             interval=interval,
             days_of_week=days_of_week if days_of_week else None,
+            # firstDayOfWeek is required by Graph API for weekly patterns (defaults to Sunday)
+            first_day_of_week=DayOfWeek.Sunday,
         )
 
         # Build range

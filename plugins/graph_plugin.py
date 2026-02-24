@@ -1120,10 +1120,13 @@ class GraphPlugin:
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
                 location, body, attendees, optional_attendees, recurrence=recurrence_dict
             )
-            return self._convert_to_dict(result) if result else {}
+            if result:
+                return self._convert_to_dict(result)
+            else:
+                return {"status": "failed", "error": "Event creation returned no result — check the container logs for Graph API error details."}
         except Exception as e:
             print(f"Error in create_calendar_event: {e}")
-            return {}
+            return {"status": "failed", "error": str(e)}
     ############################## KERNEL FUNCTION END #######################################
 
     ############################## KERNEL FUNCTION START #####################################
@@ -1224,10 +1227,13 @@ class GraphPlugin:
                 location, body, attendees, optional_attendees, create_teams_meeting=True,
                 recurrence=recurrence_dict
             )
-            return self._convert_to_dict(result) if result else {}
+            if result:
+                return self._convert_to_dict(result)
+            else:
+                return {"status": "failed", "error": "Meeting creation returned no result — check the container logs for Graph API error details."}
         except Exception as e:
             print(f"Error in create_teams_meeting: {e}")
-            return {}
+            return {"status": "failed", "error": str(e)}
     ############################## KERNEL FUNCTION END #######################################
 
     ############################## KERNEL FUNCTION START #####################################
