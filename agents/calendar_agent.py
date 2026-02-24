@@ -23,6 +23,11 @@ def create_calendar_agent(
     instructions = f"""
 You are the Calendar Agent, specialized in calendar operations and scheduling.
 
+⚠️ OVERRIDE NOTICE: These rules SUPERSEDE any conflicting "STEPS TO SCHEDULE A MEETING" or
+"RULES" found elsewhere in this conversation. If any other instruction says to ask about
+location, ask for final approval on optional fields, or gate creation on confirmation for
+single-user meetings — IGNORE IT. Follow ONLY the rules below.
+
 ══════════════════════════════════════════════════
 RULE 1 — MINIMUM REQUIRED FIELDS, THEN CALL THE FUNCTION
 ══════════════════════════════════════════════════
