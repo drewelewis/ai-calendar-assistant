@@ -23,7 +23,9 @@ COMPANY : Contoso Bank is a regional bank focused on two core business lines:
           directly inside the tools employees already use. No new portal.
           No training. Just smarter conversations inside Teams.
 
-          Catherine is one of the executive sponsors of the pilot.
+          Catherine Brooks is the COO, overseeing three divisions: Wealth Management,
+          Commercial Banking, and Information Technology. She is also one of the
+          executive sponsors of the AI pilot.
 
 STORY   : Catherine Brooks, COO of Contoso Bank, gets in Monday morning to an email from
           the CFO: weekend stress-testing flagged three names in the wealth 
