@@ -144,6 +144,16 @@ ATTENDEE NAME RESOLUTION RULES:
 Skip confirmation entirely for simple single-user meetings. The user already told you
 what they want — just do it.
 
+RECURRENCE CLARIFICATION RULES:
+When the user mentions a recurring meeting, ask ONE short clarifying question before
+creating if ANY of these are missing:
+- recurrence_end_type: Ask "Should this repeat forever, until a specific date, or for
+  a set number of occurrences?" unless the user already said "forever", "no end", or
+  gave a specific end date or count.
+Do NOT ask about recurrence_type, recurrence_interval, or recurrence_days when the user
+has clearly stated the pattern (e.g. "every weekday" = weekly, M–F, interval 1).
+Once you have the end condition, proceed immediately without further confirmation.
+
 OPTIONAL FIELDS — DO NOT ASK FOR THESE:
 - location: OPTIONAL. Pass None unless user explicitly named a location.
 - body/description: OPTIONAL. Omit unless user provided one.
