@@ -21,6 +21,10 @@ The AI Calendar Assistant is a sophisticated **multi-agent orchestration system*
 - **🔄 Automated Version Management**: Seamless CI/CD with automatic version incrementation
 - **📊 Comprehensive Telemetry**: Full observability with Application Insights integration
 
+## 🏗️ Reference Architecture
+
+![Reference Architecture](images/reference_architecture.png)
+
 ## 💼 Business Value & Executive Overview
 
 ### 🎯 Problem Statement & Solution
