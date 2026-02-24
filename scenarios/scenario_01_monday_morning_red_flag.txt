@@ -6,6 +6,25 @@ LOGIN   : cabrooks@MngEnvMCAP623732.onmicrosoft.com
 PASSWORD: TempP@ss2026!
 USER ID : 967eb41e-163d-4a02-be26-fde3bbafd662
 
+COMPANY : Contoso Bank is a regional bank focused on two core business lines:
+          Wealth Management and Commercial Banking. With a client book spanning
+          high-net-worth individuals, family offices, and mid-market commercial
+          borrowers, the firm operates across multiple metro markets and manages
+          a significant leveraged finance portfolio.
+
+          Contoso is in the middle of a firm-wide AI enablement initiative —
+          the strategic bet is that AI-empowered employees will outperform
+          competitors who built AI for customers first. The program covers
+          productivity tooling, internal knowledge access, risk workflows, and
+          client relationship support.
+
+          The current pilot is a custom Microsoft Teams app and M365 Copilot
+          extension, built on Azure AI Foundry, that puts intelligent agents
+          directly inside the tools employees already use. No new portal.
+          No training. Just smarter conversations inside Teams.
+
+          Catherine is one of the executive sponsors of the pilot.
+
 STORY   : Catherine Brooks, COO of Contoso Bank, gets in Monday morning to an email from
           the CFO: weekend stress-testing flagged three names in the wealth 
           book with elevated covenant exposure given Friday's rate move.
@@ -15,7 +34,7 @@ STORY   : Catherine Brooks, COO of Contoso Bank, gets in Monday morning to an em
           then needs to get the right people on a call — all before her 
           10am with the CEO. 
           
-         Catherine's next step is to address a conversation she had via a Teams Chat with Julie Parker.
+          Catherine's next step is to address a conversation she had via a Teams Chat with Julie Parker.
 
           It seems the AI rollout at Contoso is on track to be 6 months late.  The competitors are
           way ahead and have created efficiencies that enhance employee capabilities and are now expanding
