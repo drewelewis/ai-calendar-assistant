@@ -37,6 +37,11 @@ from telemetry.console_output import console_info, console_debug, console_teleme
 load_dotenv(override=True)
 
 # ---------------------------------------------------------------------------
+# Module-level CosmosDB singleton — created once, reused across all requests
+# ---------------------------------------------------------------------------
+_shared_cosmos_manager: Optional[CosmosDBChatHistoryManager] = None
+
+# ---------------------------------------------------------------------------
 # Routing prompt â€” kept short and deterministic (very low token budget reply)
 # ---------------------------------------------------------------------------
 _ROUTER_SYSTEM = """\
@@ -124,20 +129,28 @@ class MultiAgentOrchestrator:
             )
 
     def _initialize_cosmos(self):
+        global _shared_cosmos_manager
         if self.cosmos_endpoint:
-            try:
-                with TelemetryContext(operation="cosmosdb_init"):
-                    self.cosmos_manager = CosmosDBChatHistoryManager(
-                        self.cosmos_endpoint,
-                        self.cosmos_database,
-                        self.cosmos_container,
-                    )
-                    self.logger.info("âœ… CosmosDB initialised")
-            except Exception as e:
-                self.logger.error(f"CosmosDB init failed: {e}")
-                self.cosmos_manager = None
+            if _shared_cosmos_manager is not None:
+                # Reuse the existing singleton — avoids a new CosmosClient +
+                # list_databases() round-trip on every request (~200-400 ms)
+                self.cosmos_manager = _shared_cosmos_manager
+                self.logger.debug("CosmosDB singleton reused")
+            else:
+                try:
+                    with TelemetryContext(operation="cosmosdb_init"):
+                        _shared_cosmos_manager = CosmosDBChatHistoryManager(
+                            self.cosmos_endpoint,
+                            self.cosmos_database,
+                            self.cosmos_container,
+                        )
+                        self.cosmos_manager = _shared_cosmos_manager
+                        self.logger.info("✅ CosmosDB initialised (singleton created)")
+                except Exception as e:
+                    self.logger.error(f"CosmosDB init failed: {e}")
+                    self.cosmos_manager = None
         else:
-            self.logger.info("COSMOS_ENDPOINT not set â€” chat history disabled")
+            self.logger.info("COSMOS_ENDPOINT not set — chat history disabled")
             self.cosmos_manager = None
 
     def _setup_openai_service(self):
