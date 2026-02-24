@@ -625,6 +625,69 @@ class AzureMapsOperations:
                 error_text = await response.text()
                 console_error(f"POI search failed: {response.status} — {error_text[:200]}", "AzureMaps")
                 raise Exception(f"POI search failed: {response.status}")
+
+    async def search_fuzzy(self,
+                           query: str,
+                           latitude: float,
+                           longitude: float,
+                           radius: int = 5000,
+                           limit: int = 10,
+                           country_set: Optional[List[str]] = None,
+                           language: str = "en-US") -> Dict[str, Any]:
+        """
+        Search POIs using /search/fuzzy/json — Azure Maps' best general-purpose endpoint.
+
+        Unlike /search/poi/json, fuzzy search understands natural language POI types
+        ("coffee shop", "Italian restaurant", "cozy cafe") without requiring category IDs.
+        This avoids the categorySet mismatch problem where unknown/wrong IDs cause
+        Azure Maps to fall back to generic text matching on POI names.
+        """
+        console_info(f"🔍 Fuzzy searching for '{query}' near {latitude},{longitude} within {radius}m...", "AzureMaps")
+
+        params = {
+            "api-version": "1.0",
+            "query": query,
+            "lat": latitude,
+            "lon": longitude,
+            "radius": radius,
+            "limit": limit,
+            "language": language,
+            "idxSet": "POI",          # Restrict to Points of Interest only (no addresses/streets)
+            "typeahead": "false",
+        }
+
+        if country_set:
+            params["countrySet"] = ",".join(country_set)
+
+        headers = {}
+        if self.subscription_key:
+            params["subscription-key"] = self.subscription_key
+        else:
+            credential = DefaultAzureCredential()
+            token = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
+            )
+            headers["Authorization"] = f"Bearer {token.token}"
+            if self.client_id:
+                headers["x-ms-client-id"] = self.client_id
+            else:
+                console_error("Missing AZURE_MAPS_CLIENT_ID for managed identity authentication", "AzureMaps")
+
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+        url = f"{self.base_url}/search/fuzzy/json"
+
+        async with self.session.get(url, headers=headers, params=params) as response:
+            if response.status == 200:
+                result = await response.json()
+                num_results = len(result.get("results", []))
+                console_info(f"Found {num_results} fuzzy results for '{query}'", "AzureMaps")
+                return result
+            else:
+                error_text = await response.text()
+                console_error(f"Fuzzy search failed: {response.status} — {error_text[:200]}", "AzureMaps")
+                raise Exception(f"Fuzzy search failed: {response.status}")
             
     @trace_async_method("geolocate_city_state")
     async def geolocate_city_state(self, city: str, state: str, neighborhood: str = None) -> Optional[Dict[str, Any]]:

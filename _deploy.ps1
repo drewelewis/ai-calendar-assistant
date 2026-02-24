@@ -49,11 +49,17 @@ if ($SkipVersion) {
 
 # ── Step 2: Docker build ──────────────────────────────────────────────────────
 Write-Step "Step 2: Docker build"
+# docker buildx writes progress to stderr, which triggers $ErrorActionPreference="Stop".
+# Temporarily set to Continue so docker build output doesn't kill the script.
+$ErrorActionPreference = "Continue"
 docker buildx build `
     --tag "${IMAGE_NAME}:latest" `
     --tag "${IMAGE_NAME}:${VERSION}" `
     --file dockerfile .
-if ($LASTEXITCODE -ne 0) { Write-Fail "Docker build failed" }
+$ErrorActionPreference = "Stop"
+# Verify the image was actually built (LASTEXITCODE from buildx is unreliable)
+$null = docker image inspect "${IMAGE_NAME}:${VERSION}" 2>&1
+if ($LASTEXITCODE -ne 0) { Write-Fail "Docker build failed - image '${IMAGE_NAME}:${VERSION}' not found after build" }
 Write-OK "Built ${IMAGE_NAME}:${VERSION} and :latest"
 
 # ── Step 3: Tag ───────────────────────────────────────────────────────────────

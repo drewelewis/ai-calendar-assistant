@@ -350,20 +350,22 @@ class AzureMapsPlugin:
             
             search_client = await self._get_search_client()
             
-            # Use the primary (first) category name as the text query.
-            # Azure Maps /search/poi/json does NOT support OR-style multi-term queries;
-            # category filtering is handled by categorySet, not query text.
-            primary_cat = next((c for c in category_list if c in category_mapping), category_list[0])
-            query_text = primary_cat.replace("_", " ")
-            
-            # Perform the categorized search via /search/poi/json
-            results = await search_client.search_nearby(
+            # Build a natural-language query string from the requested categories.
+            # We use /search/fuzzy/json which understands POI types semantically
+            # ("coffee shop", "Italian restaurant") without needing category IDs.
+            # Do NOT use /search/poi/json + categorySet here — the hard-coded Azure Maps
+            # category IDs are unreliable and cause the API to fall back to generic text
+            # matching on POI names (e.g. "coffee shop" → matches any store with "Shop").
+            category_labels = [cat.replace("_", " ") for cat in category_list if cat in category_mapping]
+            query_text = " ".join(category_labels[:2]) if category_labels else category_list[0].replace("_", " ")
+
+            # Perform the category search via /search/fuzzy/json
+            results = await search_client.search_fuzzy(
+                query=query_text,
                 latitude=latitude,
                 longitude=longitude,
                 radius=radius,
                 limit=limit,
-                query=query_text,
-                category_set=category_ids,
                 language=language
             )
             
