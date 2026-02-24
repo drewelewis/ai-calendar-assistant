@@ -678,17 +678,15 @@ class GraphOperations:
             except Exception as mailbox_error:
                 error_message = str(mailbox_error)
                 
-                # Check for specific mailbox-related errors
-                if "MailboxNotEnabledForRESTAPI" in error_message:
+                # Check for specific mailbox-related errors.
+                # NOTE: MailboxNotEnabledForRESTAPI / ErrorMailboxNotEnabled mean Exchange
+                # hasn't finished provisioning the mailbox yet (common in new/trial tenants).
+                # The user exists in Entra and is accountEnabled — they can still be added as
+                # a calendar attendee; Exchange will deliver the invite once provisioning completes.
+                if "MailboxNotEnabledForRESTAPI" in error_message or "ErrorMailboxNotEnabled" in error_message:
                     return {
-                        'valid': False,
-                        'message': f'User {display_name} ({user_id}) mailbox is not enabled for REST API access (likely on-premise or inactive)',
-                        'user_info': user
-                    }
-                elif "ErrorMailboxNotEnabled" in error_message:
-                    return {
-                        'valid': False,
-                        'message': f'User {display_name} ({user_id}) does not have an Exchange Online mailbox provisioned',
+                        'valid': True,
+                        'message': f'User {display_name} ({user_id}) Exchange mailbox not yet provisioned — user is valid in directory and can still receive meeting invites',
                         'user_info': user
                     }
                 else:
@@ -710,9 +708,10 @@ class GraphOperations:
                         messages_error_str = str(messages_error)
                         
                         if "MailboxNotEnabledForRESTAPI" in messages_error_str or "ErrorMailboxNotEnabled" in messages_error_str:
+                            # Exchange not provisioned yet — same as above, trust the directory
                             return {
-                                'valid': False,
-                                'message': f'User {display_name} ({user_id}) does not have a valid Exchange Online mailbox',
+                                'valid': True,
+                                'message': f'User {display_name} ({user_id}) Exchange mailbox not yet provisioned — user is valid in directory and can still receive meeting invites',
                                 'user_info': user
                             }
                         else:
