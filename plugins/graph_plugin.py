@@ -940,7 +940,6 @@ class GraphPlugin:
     )
     async def validate_user_mailbox(self, user_id: Annotated[str, "The unique user ID (GUID) of the user whose mailbox you want to validate"]) -> Annotated[dict, "Returns validation result with status and diagnostic information."]:
         self._log_function_call("validate_user_mailbox", user_id=user_id)
-        self._send_friendly_notification("🔧 Validating user mailbox status and permissions...")
         if not user_id or not user_id.strip(): 
             raise ValueError("Error: user_id parameter is empty")
         try:

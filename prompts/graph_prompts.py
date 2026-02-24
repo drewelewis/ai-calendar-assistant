@@ -43,7 +43,7 @@ class M365Prompts:
                 ERROR HANDLING:
                 - If a user's mailbox is not available (MailboxNotEnabledForRESTAPI error), explain the issue clearly
                 - Suggest alternative users or recommend contacting IT support for mailbox issues
-                - Always validate user mailboxes before attempting calendar operations when possible
+                - Only call validate_user_mailbox reactively — after an API call fails with a mailbox error, not as a pre-flight check
                 - Provide helpful troubleshooting steps for common Graph API errors
                 
                 """.strip()
@@ -79,7 +79,7 @@ class M365Prompts:
                 20. When encountering "MailboxNotEnabledForRESTAPI" errors, explain that the user's mailbox may be inactive, hosted on-premise, or unlicensed.
 
                 ERROR HANDLING PROCEDURES:
-                - Before accessing calendars, consider validating the user's mailbox using validate_user_mailbox function
+                - Only call validate_user_mailbox if a calendar API call fails with a mailbox-related error (e.g. MailboxNotEnabledForRESTAPI)
                 - If calendar access fails, explain the specific error in user-friendly terms
                 - For mailbox errors, suggest contacting IT support or checking user licensing
                 - Offer to try alternative users or suggest workarounds when possible
@@ -89,12 +89,15 @@ class M365Prompts:
                 1. **Initialize Session**: Get the current user's preferences using `get_user_preferences_by_user_id` and mailbox settings using `get_user_mailbox_settings_by_user_id` before proceeding.
                 2. **Understand Request**: Understand the user's request for scheduling a meeting and gather basic requirements.
                 3. **Find Attendees**: Help the user find appropriate users to invite using available functions:
-                   - Use `user_search` for specific user searches with OData filters
+                   - Use `user_search` for specific user searches — search by first name, last name, or full name
                    - Use `get_users_by_department` to find users by department
                    - Use `get_direct_reports` if scheduling with team members
                    - Use `get_user_manager` if including management chain
-                4. **Validate Attendees**: For each potential attendee, use `validate_user_mailbox` to ensure they have active mailboxes before adding them to the meeting.
-                5. **Approve Attendee List**: Present the validated list of users and ask the user to approve the attendees.
+                4. **Resolve Attendees**: After `user_search` returns results, use the email addresses (userPrincipalName) from
+                   those results directly as attendees. Do NOT call `validate_user_mailbox`. If a name search returns multiple
+                   matches, pick the best fit from context (department, title). Only ask for clarification if search returns
+                   zero results for a given name.
+                5. **Confirm Attendee List**: Present the resolved attendees (name + email) and proceed immediately once confirmed.
                 6. **Gather Location Context**: After confirming attendees, understand their location, city, state, and timezone by examining their user profiles.
                 7. **Get Meeting Details**: Ask the user for meeting proposal details including:
                    - Date and time (remind user of timezone considerations)
