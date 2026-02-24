@@ -1086,20 +1086,28 @@ class GraphPlugin:
         NOTE: Organizer must have calendar creation permissions
         """
     )
-    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
-        self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end, 
-                              location=location, body=body, attendees=attendees, optional_attendees=optional_attendees)
+    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, recurrence: Annotated[str, 'Optional JSON string for recurring events. Example: {"type":"weekly","interval":1,"days_of_week":["monday","tuesday","wednesday","thursday","friday"],"end_type":"noEnd"}. Fields: type=(daily|weekly|absoluteMonthly), interval=int, days_of_week=list (weekly only), end_type=(noEnd|endDate|numbered), end_date=YYYY-MM-DD (endDate), occurrences=int (numbered), start_date=YYYY-MM-DD'] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
+        self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end,
+                              location=location, body=body, attendees=attendees, optional_attendees=optional_attendees, recurrence=recurrence)
         self._send_friendly_notification("✨ Creating new calendar event and sending invitations...")
         
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         if not subject or not subject.strip(): raise ValueError("Error: subject parameter is empty")
         if not start or not start.strip(): raise ValueError("Error: start parameter is empty")
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
+
+        recurrence_dict = None
+        if recurrence:
+            import json
+            try:
+                recurrence_dict = json.loads(recurrence)
+            except Exception:
+                pass
         
         try:
             result = await graph_operations.create_calendar_event(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
-                location, body, attendees, optional_attendees
+                location, body, attendees, optional_attendees, recurrence=recurrence_dict
             )
             return self._convert_to_dict(result) if result else {}
         except Exception as e:
@@ -1170,20 +1178,29 @@ class GraphPlugin:
         NOTE: Organizer must have Teams and Exchange Online licenses
         """
     )
-    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
-        self._log_function_call("create_teams_meeting", user_id=user_id, subject=subject, start=start, end=end, 
-                              body=body, attendees=attendees, optional_attendees=optional_attendees, location=location)
+    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None, recurrence: Annotated[str, 'Optional JSON string for recurring meetings. Example: {"type":"weekly","interval":1,"days_of_week":["monday","tuesday","wednesday","thursday","friday"],"end_type":"noEnd"}. Fields: type=(daily|weekly|absoluteMonthly), interval=int, days_of_week=list (weekly only), end_type=(noEnd|endDate|numbered), end_date=YYYY-MM-DD (endDate), occurrences=int (numbered), start_date=YYYY-MM-DD'] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
+        self._log_function_call("create_teams_meeting", user_id=user_id, subject=subject, start=start, end=end,
+                              body=body, attendees=attendees, optional_attendees=optional_attendees, location=location, recurrence=recurrence)
         self._send_friendly_notification("🎥 Creating Microsoft Teams meeting with video conference link...")
         
         if not user_id or not user_id.strip(): raise ValueError("Error: user_id parameter is empty")
         if not subject or not subject.strip(): raise ValueError("Error: subject parameter is empty")
         if not start or not start.strip(): raise ValueError("Error: start parameter is empty")
         if not end or not end.strip(): raise ValueError("Error: end parameter is empty")
+
+        recurrence_dict = None
+        if recurrence:
+            import json
+            try:
+                recurrence_dict = json.loads(recurrence)
+            except Exception:
+                pass
         
         try:
             result = await graph_operations.create_calendar_event_with_teams(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
-                location, body, attendees, optional_attendees, create_teams_meeting=True
+                location, body, attendees, optional_attendees, create_teams_meeting=True,
+                recurrence=recurrence_dict
             )
             return self._convert_to_dict(result) if result else {}
         except Exception as e:

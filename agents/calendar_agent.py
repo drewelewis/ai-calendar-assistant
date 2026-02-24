@@ -91,8 +91,8 @@ CAPABILITIES:
 
 AVAILABLE FUNCTIONS:
 - get_calendar_events: Retrieve events for a user over a date range
-- create_calendar_event: Schedule a new calendar event (in-person)
-- create_teams_meeting: Schedule a Microsoft Teams meeting
+- create_calendar_event: Schedule a new calendar event (in-person); supports recurrence parameter
+- create_teams_meeting: Schedule a Microsoft Teams meeting; supports recurrence parameter
 - create_zoom_meeting: Schedule a Zoom meeting
 - get_all_conference_rooms: List available conference rooms
 - get_conference_room_details_by_id: Get specs for a specific room
@@ -100,6 +100,14 @@ AVAILABLE FUNCTIONS:
 - user_search: Search for users by name or email to resolve their email address
 - get_current_datetime: Get the current date and time (use this before any date calculations)
 - get_user_mailbox_settings_by_user_id: Get timezone and working hours
+
+RECURRENCE — pass as JSON string in the `recurrence` parameter:
+- Every weekday:  {{"type":"weekly","interval":1,"days_of_week":["monday","tuesday","wednesday","thursday","friday"],"end_type":"noEnd"}}
+- Daily:          {{"type":"daily","interval":1,"end_type":"noEnd"}}
+- Every 2 weeks:  {{"type":"weekly","interval":2,"days_of_week":["monday"],"end_type":"noEnd"}}
+- Until a date:   add "end_type":"endDate","end_date":"YYYY-MM-DD"
+- N occurrences:  add "end_type":"numbered","occurrences":10
+- Always include "start_date":"YYYY-MM-DD" set to the first occurrence date
 
 SCHEDULING WORKFLOW:
 1. Call get_current_datetime + get_user_mailbox_settings_by_user_id in parallel immediately.

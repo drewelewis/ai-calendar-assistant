@@ -28,6 +28,12 @@ from msgraph.generated.models.attendee import Attendee
 from msgraph.generated.models.email_address import EmailAddress
 from msgraph.generated.models.online_meeting import OnlineMeeting
 from msgraph.generated.models.chat_info import ChatInfo
+from msgraph.generated.models.patterned_recurrence import PatternedRecurrence
+from msgraph.generated.models.recurrence_pattern import RecurrencePattern
+from msgraph.generated.models.recurrence_pattern_type import RecurrencePatternType
+from msgraph.generated.models.recurrence_range import RecurrenceRange
+from msgraph.generated.models.recurrence_range_type import RecurrenceRangeType
+from msgraph.generated.models.day_of_week import DayOfWeek
 
 # Load environment variables from .env file
 try:
@@ -269,6 +275,77 @@ class GraphOperations:
         # Show first part and last part with ellipsis in middle
         half_length = (max_length - 3) // 2
         return f"{event_id[:half_length]}...{event_id[-half_length:]}"
+
+    def _build_recurrence(self, recurrence_dict: dict) -> PatternedRecurrence:
+        """
+        Build a PatternedRecurrence Graph SDK object from a plain dict.
+
+        Expected dict keys:
+          type        : 'daily' | 'weekly' | 'absoluteMonthly' | 'relativeMonthly'
+          interval    : int (default 1)
+          days_of_week: list[str] — for weekly, e.g. ['monday','tuesday','wednesday','thursday','friday']
+          end_type    : 'noEnd' | 'endDate' | 'numbered'
+          end_date    : 'YYYY-MM-DD'  — required when end_type=='endDate'
+          occurrences : int           — required when end_type=='numbered'
+          start_date  : 'YYYY-MM-DD'  — optional, defaults to today
+        """
+        import datetime
+
+        DAY_MAP = {
+            'sunday':    DayOfWeek.Sunday,
+            'monday':    DayOfWeek.Monday,
+            'tuesday':   DayOfWeek.Tuesday,
+            'wednesday': DayOfWeek.Wednesday,
+            'thursday':  DayOfWeek.Thursday,
+            'friday':    DayOfWeek.Friday,
+            'saturday':  DayOfWeek.Saturday,
+        }
+        TYPE_MAP = {
+            'daily':             RecurrencePatternType.Daily,
+            'weekly':            RecurrencePatternType.Weekly,
+            'absoluteMonthly':   RecurrencePatternType.AbsoluteMonthly,
+            'relativeMonthly':   RecurrencePatternType.RelativeMonthly,
+            'absoluteYearly':    RecurrencePatternType.AbsoluteYearly,
+            'relativeYearly':    RecurrencePatternType.RelativeYearly,
+        }
+        RANGE_MAP = {
+            'noEnd':    RecurrenceRangeType.NoEnd,
+            'endDate':  RecurrenceRangeType.EndDate,
+            'numbered': RecurrenceRangeType.Numbered,
+        }
+
+        pattern_type = TYPE_MAP.get(recurrence_dict.get('type', 'daily'), RecurrencePatternType.Daily)
+        interval = int(recurrence_dict.get('interval', 1))
+
+        days_raw = recurrence_dict.get('days_of_week', [])
+        days_of_week = [DAY_MAP[d.lower()] for d in days_raw if d.lower() in DAY_MAP]
+
+        pattern = RecurrencePattern(
+            type=pattern_type,
+            interval=interval,
+            days_of_week=days_of_week if days_of_week else None,
+        )
+
+        # Build range
+        end_type_str = recurrence_dict.get('end_type', 'noEnd')
+        range_type = RANGE_MAP.get(end_type_str, RecurrenceRangeType.NoEnd)
+
+        start_date_str = recurrence_dict.get('start_date')
+        if start_date_str:
+            start_date = datetime.date.fromisoformat(start_date_str)
+        else:
+            start_date = datetime.date.today()
+
+        rec_range = RecurrenceRange(type=range_type, start_date=start_date)
+
+        if range_type == RecurrenceRangeType.EndDate:
+            end_date_str = recurrence_dict.get('end_date')
+            if end_date_str:
+                rec_range.end_date = datetime.date.fromisoformat(end_date_str)
+        elif range_type == RecurrenceRangeType.Numbered:
+            rec_range.number_of_occurrences = int(recurrence_dict.get('occurrences', 10))
+
+        return PatternedRecurrence(pattern=pattern, range=rec_range)
 
     def _get_user_attribute(self, user, attribute_name: str, default_value='Unknown'):
         """
@@ -1425,7 +1502,7 @@ class GraphOperations:
     
     # Create calendar event for a list of attendees and optional attendees
     @trace_async_method("create_calendar_event", include_args=True)
-    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None) -> Event:
+    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, recurrence: dict = None) -> Event:
         try:
             console_info(f"Creating calendar event: {subject} for user {user_id}", "GraphOps")
             console_telemetry_event("calendar_event_create_start", {
@@ -1480,7 +1557,12 @@ class GraphOperations:
                 body=ItemBody(content_type=BodyType.Html, content=enhanced_body),
                 attendees=[]
             )
-            
+
+            # Apply recurrence if provided
+            if recurrence:
+                event.recurrence = self._build_recurrence(recurrence)
+                console_info(f"Recurrence applied: {recurrence.get('type')} every {recurrence.get('interval',1)} — {recurrence.get('end_type','noEnd')}", "GraphOps")
+
             # Add required attendees
             if attendees:
                 for attendee in attendees:
@@ -1938,7 +2020,7 @@ class GraphOperations:
 
     # Enhanced create calendar event with online meeting options
     @trace_async_method("create_calendar_event_with_online_meeting", include_args=True)
-    async def create_calendar_event_with_online_meeting(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_online_meeting: bool = False, meeting_platform: str = None) -> Event:
+    async def create_calendar_event_with_online_meeting(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_online_meeting: bool = False, meeting_platform: str = None, recurrence: dict = None) -> Event:
         """
         Create a calendar event with optional online meeting integration (Zoom or Teams).
         
@@ -2021,7 +2103,12 @@ class GraphOperations:
                 body=ItemBody(content_type=BodyType.Html, content=enhanced_body) if enhanced_body else None,
                 attendees=[]
             )
-            
+
+            # Apply recurrence if provided
+            if recurrence:
+                event.recurrence = self._build_recurrence(recurrence)
+                console_info(f"Recurrence applied: {recurrence.get('type')} every {recurrence.get('interval',1)} — {recurrence.get('end_type','noEnd')}", "GraphOps")
+
             # Add online meeting info to the event if available
             if online_meeting_info and create_online_meeting:
                 # The Teams meeting info is already included in the enhanced_body and enhanced_location
@@ -2087,7 +2174,7 @@ class GraphOperations:
 
     # Backward compatibility method for Teams meetings
     @trace_async_method("create_calendar_event_with_teams", include_args=True)
-    async def create_calendar_event_with_teams(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_teams_meeting: bool = False) -> Event:
+    async def create_calendar_event_with_teams(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_teams_meeting: bool = False, recurrence: dict = None) -> Event:
         """
         Create a calendar event with Teams meeting (backward compatibility wrapper).
         """
@@ -2101,7 +2188,8 @@ class GraphOperations:
             attendees=attendees,
             optional_attendees=optional_attendees,
             create_online_meeting=create_teams_meeting,
-            meeting_platform='teams'
+            meeting_platform='teams',
+            recurrence=recurrence
         )
 
     # Get and display conference room events
