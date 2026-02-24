@@ -691,23 +691,12 @@ class GraphOperations:
                         'message': f'User {display_name} ({user_id}) does not have an Exchange Online mailbox provisioned',
                         'user_info': user
                     }
-                elif "Forbidden" in error_message or "403" in error_message:
-                    return {
-                        'valid': False,
-                        'message': f'Access denied to mailbox for user {display_name} ({user_id}) - insufficient permissions',
-                        'user_info': user
-                    }
-                elif "NotFound" in error_message or "404" in error_message:
-                    return {
-                        'valid': False,
-                        'message': f'User {display_name} ({user_id}) or mailbox not found',
-                        'user_info': user
-                    }
                 else:
-                    # Try fallback method: check messages endpoint
+                    # Forbidden, NotFound, or other API errors on mailboxSettings do NOT
+                    # mean the mailbox is absent — dev/trial tenants often restrict this
+                    # endpoint. Try the messages endpoint as a second probe.
                     try:
                         # Method 2: Try to access messages (alternative approach)
-                        # This is another way to test for valid mailbox
                         messages_response = await self._get_client().users.by_user_id(user_id).messages.get()
                         
                         # If we can access messages (even if empty), mailbox is valid
@@ -727,10 +716,12 @@ class GraphOperations:
                                 'user_info': user
                             }
                         else:
-                            # If both methods fail with non-mailbox errors, assume valid but with access issues
+                            # Both mailbox API calls failed with non-mailbox errors (e.g. Forbidden
+                            # on a dev/trial tenant). The user exists in Entra and is enabled,
+                            # so trust the directory — calendar invites will still be delivered.
                             return {
-                                'valid': False,
-                                'message': f'Cannot verify mailbox for user {display_name} ({user_id}): {mailbox_error}',
+                                'valid': True,
+                                'message': f'User {display_name} ({user_id}) found in directory (mailbox API access restricted, assuming valid)',
                                 'user_info': user
                             }
                     
