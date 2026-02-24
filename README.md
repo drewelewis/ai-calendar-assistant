@@ -25,6 +25,34 @@ The AI Calendar Assistant is a sophisticated **multi-agent orchestration system*
 
 ![Reference Architecture](images/reference_architecture.png)
 
+### Why Teams + Copilot + Azure AI Foundry?
+
+Most enterprise AI deployments get this relationship backwards — they try to make the chat interface smart. We don't. **Microsoft 365 Copilot and Teams act as a thin, trusted veneer**: the surfaces your employees already live in, requiring zero new app installs, zero change management, and zero new logins. They handle presence, identity, notifications, and the familiar conversation UI. Nothing more.
+
+**Azure AI Foundry does the heavy lifting.**
+
+Every agent, every tool call, every reasoning step, every guardrail, and every integration lives inside Foundry — not inside Copilot, not inside Teams. This separation is intentional and strategically critical:
+
+| Layer | Role | What it owns |
+|-------|------|-------------|
+| **Teams / M365 Copilot** | Thin veneer — surfaces & identity | UX, auth, notifications, org presence |
+| **Azure AI Foundry** | Intelligence engine | Agents, orchestration, tools, memory, guardrails |
+| **Microsoft Graph / APIs** | Data & actions | Calendar, directory, email, line-of-business systems |
+
+**Why this architecture wins:**
+
+- **Works where your people already are.** No new app to download, no new portal to learn. If your employees use Teams today, they get AI capability tomorrow — in the same window, same chat thread, same notification model.
+
+- **Foundry owns the logic, not the UI.** When you need to add an agent, change a prompt, integrate a new system, or tighten a guardrail, you do it once in Foundry. No Teams app republish. No Copilot plugin resubmission chains. The veneer stays thin on purpose.
+
+- **Enterprise control lives where it belongs.** Governance, model selection, data grounding, content filtering, telemetry, and cost management are all Foundry-side concerns — visible, auditable, and independent of the Microsoft 365 release cycle.
+
+- **Future-proof surface flexibility.** Because the intelligence is decoupled from the surface, the same Foundry agents that answer a Teams chat today can power a web portal, a mobile app, or a customer-facing interface tomorrow — without rewriting the core.
+
+- **Composable and extensible.** New agents plug into the orchestration layer, not into Teams or Copilot config. The architecture scales from a single scheduling assistant to a full enterprise agentic platform by adding Foundry components, not by multiplying M365 plugin registrations.
+
+> **The short version:** Teams and Copilot get you to the employee. Foundry gets the work done.
+
 ## 💼 Business Value & Executive Overview
 
 ### 🎯 Problem Statement & Solution
