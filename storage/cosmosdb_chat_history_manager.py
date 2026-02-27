@@ -206,20 +206,46 @@ class CosmosDBChatHistoryManager:
             # Re-raise the exception so calling code can handle it
             raise
         
+    async def get_session_document(self, session_id):
+        """
+        Get the full session document from Cosmos DB.
+        
+        Args:
+            session_id: Session ID to retrieve
+            
+        Returns:
+            dict: Full session document with messages, timestamp, etc., or None if not found
+        """
+        try:
+            query = "SELECT TOP 1 * FROM c WHERE c.sessionId = @session_id ORDER BY c.timestamp DESC"
+            parameters = [{"name": "@session_id", "value": session_id}]
+            items = list(self.container.query_items(
+                query=query, 
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
+            
+            if not items:
+                print(f"No session document found for session ID: {session_id}")
+                return None
+                
+            # Return the most recent document
+            return items[0]
+        except Exception as e:
+            print(f"Error retrieving session document from CosmosDB: {e}")
+            return None
+    
     async def load_chat_history(self, session_id):
         """Load chat history from Cosmos DB and return the raw messages."""
         try:
-            query = f"SELECT * FROM c WHERE c.sessionId = '{session_id}' ORDER BY c.timestamp DESC"
-            items = list(self.container.query_items(query=query, enable_cross_partition_query=True))
+            # Use the centralized query method
+            chat_history = await self.get_session_document(session_id)
             
-            if not items:
+            if not chat_history:
                 print(f"No chat history found for session ID: {session_id}")
                 return None
                 
-            # Take the most recent chat history
-            chat_history = items[0]
             messages = chat_history.get("messages", [])
-            
             print(f"Loaded chat history with {len(messages)} messages from {chat_history.get('timestamp', 'unknown time')}")
             
             # Return the raw messages - thread recreation will be handled by the calling code
@@ -243,8 +269,13 @@ class CosmosDBChatHistoryManager:
             
             # Clear specific session
             print(f"Clearing chat history for session ID: {session_id}")
-            query = f"SELECT c.id, c.sessionId FROM c WHERE c.sessionId = '{session_id}'"
-            items = list(self.container.query_items(query=query, enable_cross_partition_query=True))
+            query = "SELECT c.id, c.sessionId FROM c WHERE c.sessionId = @session_id"
+            parameters = [{"name": "@session_id", "value": session_id}]
+            items = list(self.container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True
+            ))
             
             if not items:
                 print(f"No chat history found for session ID: {session_id}")

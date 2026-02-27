@@ -45,8 +45,8 @@ _shared_cosmos_manager: Optional[CosmosDBChatHistoryManager] = None
 # Routing prompt â€” kept short and deterministic (very low token budget reply)
 # ---------------------------------------------------------------------------
 _ROUTER_SYSTEM = """\
-You are a request router. Given a user message, reply with EXACTLY ONE word â€” \
-the name of the agent best suited to handle it.
+You are a request router. Given a user message (and optional recent conversation context), \
+reply with EXACTLY ONE word - the name of the agent best suited to handle it.
 
 Agents and their domains:
 - calendar   : scheduling meetings, recurring meetings, standups, reminders, calendar events, availability, conference rooms, Teams/Zoom meetings
@@ -56,7 +56,11 @@ Agents and their domains:
 - risk       : client risk profiles, financial exposure, credit risk, portfolio analysis, compliance
 - proxy      : greetings, general questions, clarification, anything else
 
-Reply with only the single word agent name â€” no punctuation, no explanation.\
+IMPORTANT: When the new message is ambiguous (e.g. "yes", "sure", "near my office", "there", \
+"ok", "that works", "go ahead"), use the recent conversation context to determine which agent \
+was last active and route to that same agent. Do NOT default to proxy for follow-up confirmations.
+
+Reply with only the single word agent name - no punctuation, no explanation.\
 """
 
 
@@ -213,9 +217,33 @@ class MultiAgentOrchestrator:
     # LLM-based router
     # ------------------------------------------------------------------
 
-    async def _route_message(self, message: str) -> ChatCompletionAgent:
+    def _extract_recent_context(self, thread) -> str:
+        """
+        Pull the last few messages from the hydrated CosmosDB thread for routing context.
+        This lets the router correctly handle ambiguous follow-ups like 'yes', 'near my office'.
+        """
+        try:
+            messages = []
+            if hasattr(thread, '_chat_history') and hasattr(thread._chat_history, 'messages'):
+                messages = thread._chat_history.messages
+            if not messages:
+                return ""
+            # Last 4 messages is enough context for the router without blowing the token budget
+            recent = messages[-4:]
+            lines = []
+            for msg in recent:
+                role = str(msg.role).split('.')[-1].lower() if msg.role else 'unknown'
+                content = str(msg.content)[:200] if msg.content else ''
+                lines.append(f"{role}: {content}")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    async def _route_message(self, message: str, recent_context: str = "") -> ChatCompletionAgent:
         """
         Ask the LLM which agent should handle `message`.
+        Passes recent CosmosDB conversation context so ambiguous follow-ups
+        ('yes', 'near my office', 'ok') route to the correct agent instead of proxy.
         Returns the selected ChatCompletionAgent (defaults to proxy on any failure).
         """
         try:
@@ -236,7 +264,13 @@ class MultiAgentOrchestrator:
 
             routing_history = ChatHistory()
             routing_history.add_system_message(_ROUTER_SYSTEM)
-            routing_history.add_user_message(message)
+
+            # Include recent CosmosDB context so the router understands follow-up messages
+            if recent_context:
+                user_prompt = f"Recent conversation:\n{recent_context}\n\nNew message: {message}"
+            else:
+                user_prompt = message
+            routing_history.add_user_message(user_prompt)
 
             result = await service.get_chat_message_contents(
                 chat_history=routing_history,
@@ -304,9 +338,10 @@ class MultiAgentOrchestrator:
         except Exception as e:
             self.logger.warning(f"ensure_system_and_instruction_messages: {e}")
 
-        # --- LLM routing ---
+        # --- LLM routing (with CosmosDB context for ambiguous follow-ups) ---
+        recent_context = self._extract_recent_context(thread)
         with TelemetryContext(operation="llm_routing", message_length=len(message)):
-            selected_agent = await self._route_message(message)
+            selected_agent = await self._route_message(message, recent_context)
 
         # --- Dispatch to selected agent ---
         response_content = ""

@@ -256,26 +256,23 @@ class AzureMapsPlugin:
         - "Find hotels and tourist attractions in the area"
         - "Locate all the banks and ATMs around here"
         
-        SUPPORTED CATEGORIES:
-        - restaurant: Restaurants and dining establishments
-        - fast_food: Fast food restaurants
-        - gas_station: Fuel stations and gas pumps
-        - hotel: Hotels and accommodations
-        - hospital: Medical facilities and hospitals
-        - pharmacy: Pharmacies and drug stores
-        - shopping: Shopping centers and retail stores
-        - shopping_center: Malls and shopping centers
-        - atm: Automated Teller Machines
-        - bank: Banking institutions
-        - school: Educational institutions
-        - airport: Airports and aviation facilities
-        - coffee_shop: Coffee shops and cafes
-        - cafe: Cafes and coffee houses
-        - bar: Bars and pubs
-        - supermarket: Grocery stores and supermarkets
-        - gym: Gyms and fitness centers
-        - parking: Parking lots and garages
-        - tourist_attraction: Points of interest for tourists
+        SUPPORTED CATEGORIES (sample — 150+ total supported):
+        Food: restaurant, fast_food, pizza, sushi, cafe, coffee_shop, bar, pub, bakery, diner, buffet, seafood_restaurant, steak_house, italian_restaurant, mexican_restaurant, chinese_restaurant, japanese_restaurant, indian_restaurant, thai_restaurant, french_restaurant, mediterranean_restaurant + many more cuisine types
+        Drinks: coffee, tea_house, juice_bar, wine_bar, sports_bar, cocktail_bar, nightclub, brewery, winery
+        Hotels: hotel, motel, hostel, resort, bed_and_breakfast, vacation_rental, campground
+        Medical: hospital, urgent_care, clinic, doctor, dentist, pharmacy, veterinarian
+        Finance: bank, atm, currency_exchange
+        Shopping: shopping_center, mall, supermarket, grocery, convenience_store, department_store, electronics_store, clothing_store, hardware_store, bookstore, farmers_market + more
+        Automotive: gas_station, ev_charging, car_wash, car_rental, auto_repair, parking, parking_garage
+        Transit: airport, train_station, subway_station, bus_station, ferry_terminal
+        Education: school, college, university, library
+        Entertainment: bowling_alley, movie_theater, museum, art_gallery, zoo, amusement_park, casino, arcade, escape_room, go_kart, theater, concert_hall
+        Sports/Fitness: gym, fitness_center, yoga, swimming_pool, tennis_court, golf_course, stadium, ice_skating_rink, ski_resort, climbing_gym
+        Outdoors: park, national_park, beach, hiking, trail, marina, botanical_garden, scenic_view
+        Services: post_office, police_station, place_of_worship, church, mosque, synagogue
+        Beauty: hair_salon, barber, nail_salon, spa, massage
+        
+        Map any user phrasing to the closest category key — do not ask the user to pick from this list.
         
         FILTERING ADVANTAGES:
         - Reduces noise in search results
@@ -305,29 +302,270 @@ class AzureMapsPlugin:
             self._send_friendly_notification(f"🏷️ Searching for {categories} near your location...")
             
             # Map category names to Azure Maps category IDs (lists support multiple IDs per category)
-            # Reference: https://docs.microsoft.com/en-us/rest/api/maps/search/get-search-nearby
+            # NOTE: IDs are used for display reverse-mapping only. Searches use fuzzy text queries.
+            # Reference: https://learn.microsoft.com/en-us/azure/azure-maps/supported-search-categories
             category_mapping = {
+                # ── Food & Dining ──────────────────────────────────────────────────────────
                 'restaurant': [7315],
+                'american_restaurant': [7315001],
                 'italian_restaurant': [7315025],
                 'french_restaurant': [7315017],
+                'mexican_restaurant': [7315031],
+                'chinese_restaurant': [7315005],
+                'japanese_restaurant': [7315024],
+                'sushi': [7315042],
+                'korean_restaurant': [7315026],
+                'thai_restaurant': [7315043],
+                'vietnamese_restaurant': [7315046],
+                'indian_restaurant': [7315018],
+                'mediterranean_restaurant': [7315030],
+                'greek_restaurant': [7315015],
+                'spanish_restaurant': [7315040],
+                'latin_american_restaurant': [7315027],
+                'middle_eastern_restaurant': [7315032],
+                'lebanese_restaurant': [7315028],
+                'turkish_restaurant': [7315044],
+                'moroccan_restaurant': [7315033],
+                'caribbean_restaurant': [7315006],
+                'german_restaurant': [7315014],
+                'british_restaurant': [7315004],
+                'seafood_restaurant': [7315039],
+                'steak_house': [7315041],
+                'steakhouse': [7315041],
+                'buffet': [7315047],
+                'vegetarian': [7315045],
+                'vegan': [7315045],
                 'fast_food': [7315036],
-                'gas_station': [7311],
+                'burger': [7315036],
+                'pizza': [7315],
+                'diner': [7315001],
+                'bistro': [7315],
+                'food_court': [7315],
+                'food_truck': [7315],
+                'ice_cream': [7315048],
+                'dessert': [7315048],
+                'bakery': [9361],
+                'sandwich_shop': [7315036],
+                # ── Cafes & Drinks ─────────────────────────────────────────────────────────
+                'coffee_shop': [9375002, 9361007],
+                'coffee': [9375002],
+                'cafe': [9361007, 9375002],
+                'tea_house': [9361007],
+                'juice_bar': [9361007],
+                'smoothie': [9361007],
+                'bar': [9376003],
+                'pub': [9376003],
+                'sports_bar': [9376001],
+                'cocktail_bar': [9376003],
+                'wine_bar': [9376003],
+                'nightclub': [7929],
+                'nightlife': [7929],
+                'club': [7929],
+                'discotheque': [7929],
+                'karaoke': [7929],
+                'jazz_club': [7929],
+                'comedy_club': [9379],
+                'brewery': [9375002],
+                'winery': [7254],
+                'vineyard': [7254],
+                'distillery': [9375002],
+                # ── Accommodations ─────────────────────────────────────────────────────────
                 'hotel': [7314],
+                'motel': [7314],
+                'hostel': [7314],
+                'bed_and_breakfast': [7314],
+                'resort': [7314],
+                'vacation_rental': [7314],
+                'campground': [9715003],
+                'camping': [9715003],
+                'rv_park': [9715003],
+                # ── Health & Medical ───────────────────────────────────────────────────────
                 'hospital': [9663],
+                'emergency_room': [9663],
+                'urgent_care': [9663],
+                'clinic': [9663],
+                'medical_center': [9663],
+                'doctor': [7324],
+                'physician': [7324],
+                'dentist': [7323],
                 'pharmacy': [9927],
+                'drugstore': [9927],
+                'optician': [9927],
+                'veterinarian': [9941],
+                'vet': [9941],
+                'health_care': [9663],
+                # ── Finance & Banking ──────────────────────────────────────────────────────
+                'bank': [7380],
+                'atm': [7372],
+                'cash_machine': [7372],
+                'credit_union': [7380],
+                'currency_exchange': [7380],
+                # ── Shopping & Retail ──────────────────────────────────────────────────────
                 'shopping': [9362],
                 'shopping_center': [9362],
-                'atm': [7372],
-                'school': [9352],
-                'airport': [7832],
-                'bank': [7380],
-                'coffee_shop': [9375002, 9361007],   # Coffee Shop / Café-Coffee House
-                'cafe': [9361007, 9375002],
-                'bar': [9376003],
+                'mall': [9362],
                 'supermarket': [7332],
-                'gym': [9715],
+                'grocery': [7332],
+                'hypermarket': [7332],
+                'convenience_store': [7389],
+                'department_store': [9362],
+                'electronics_store': [7327],
+                'clothing_store': [9362],
+                'shoe_store': [9362],
+                'jewelry_store': [9362],
+                'bookstore': [9362],
+                'toy_store': [9362],
+                'pet_store': [9362],
+                'home_goods': [9362],
+                'hardware_store': [9362],
+                'furniture_store': [9362],
+                'florist': [9362],
+                'gift_shop': [9362],
+                'sporting_goods': [9362],
+                'pharmacy_store': [9927],
+                'liquor_store': [9362],
+                'farmers_market': [7332],
+                # ── Automotive ─────────────────────────────────────────────────────────────
+                'gas_station': [7311],
+                'petrol_station': [7311],
+                'fuel_station': [7311],
+                'ev_charging': [7311],
+                'electric_vehicle_station': [7311],
+                'car_wash': [7313],
+                'car_dealer': [7312],
+                'auto_dealer': [7312],
+                'car_rental': [7334],
+                'auto_repair': [7332],
+                'car_repair': [7332],
+                'tire_shop': [7332],
                 'parking': [7383],
-                'tourist_attraction': [9910]
+                'parking_garage': [7383],
+                'parking_lot': [7383],
+                # ── Transit & Transportation ───────────────────────────────────────────────
+                'airport': [7832],
+                'train_station': [7510],
+                'railway_station': [7510],
+                'subway_station': [7510],
+                'metro_station': [7510],
+                'bus_station': [7510],
+                'bus_stop': [7510],
+                'ferry_terminal': [7511],
+                'taxi_stand': [7510],
+                'truck_stop': [7383],
+                # ── Education ──────────────────────────────────────────────────────────────
+                'school': [9352],
+                'elementary_school': [9352],
+                'high_school': [9352],
+                'middle_school': [9352],
+                'college': [9352],
+                'university': [9352],
+                'library': [7252],
+                'preschool': [9352],
+                'daycare': [9352],
+                'tutoring': [9352],
+                # ── Entertainment & Recreation ─────────────────────────────────────────────
+                'entertainment': [9379],
+                'bowling_alley': [9715005],
+                'bowling': [9715005],
+                'movie_theater': [7342],
+                'cinema': [7342],
+                'theater': [7342],
+                'concert_hall': [7342],
+                'opera_house': [7342],
+                'museum': [7251],
+                'art_gallery': [7251],
+                'aquarium': [9910],
+                'zoo': [9715001],
+                'amusement_park': [9715001],
+                'theme_park': [9715001],
+                'casino': [9380],
+                'arcade': [9715003],
+                'escape_room': [9715003],
+                'go_kart': [9715006],
+                'paintball': [9715007],
+                'laser_tag': [9715003],
+                'trampoline_park': [9715003],
+                'miniature_golf': [9715],
+                'comedy_show': [9379],
+                'night_club': [7929],
+                # ── Sports & Fitness ───────────────────────────────────────────────────────
+                'gym': [9715],
+                'fitness_center': [9715],
+                'fitness': [9715],
+                'sports_center': [9715],
+                'yoga': [9715],
+                'pilates': [9715],
+                'crossfit': [9715],
+                'swimming_pool': [7523],
+                'pool': [7523],
+                'tennis_court': [7522],
+                'tennis': [7522],
+                'golf_course': [9910],
+                'golf': [9910],
+                'stadium': [7520],
+                'arena': [7520],
+                'sports_arena': [7520],
+                'ice_skating_rink': [7524],
+                'ice_skating': [7524],
+                'skiing': [9715],
+                'ski_resort': [9715],
+                'climbing_gym': [9715],
+                'rock_climbing': [9715],
+                'martial_arts': [9715],
+                'boxing': [9715],
+                'cycling': [9715],
+                'sports_club': [9715],
+                # ── Outdoors & Nature ──────────────────────────────────────────────────────
+                'park': [9362058],
+                'national_park': [9362058],
+                'beach': [7511],
+                'hiking': [9715003],
+                'trail': [9715003],
+                'marina': [7511],
+                'boat_launch': [7511],
+                'campfire_area': [9715003],
+                'nature_reserve': [9362058],
+                'botanical_garden': [9715001],
+                'scenic_view': [9910],
+                'viewpoint': [9910],
+                'waterfall': [9910],
+                # ── Services & Government ──────────────────────────────────────────────────
+                'post_office': [9952],
+                'police_station': [9352],
+                'fire_station': [9352],
+                'embassy': [9352],
+                'government_office': [9352],
+                'dmv': [9352],
+                'courthouse': [9352],
+                'community_center': [9352],
+                'place_of_worship': [9352],
+                'church': [9352],
+                'mosque': [9352],
+                'synagogue': [9352],
+                'temple': [9352],
+                'funeral_home': [9352],
+                # ── Beauty & Personal Care ─────────────────────────────────────────────────
+                'hair_salon': [7994],
+                'barber': [7994],
+                'nail_salon': [7994],
+                'spa': [9715],
+                'massage': [9715],
+                'beauty_salon': [7994],
+                'tattoo': [7994],
+                # ── Business & Professional ────────────────────────────────────────────────
+                'hotel_conference': [7314],
+                'convention_center': [9379],
+                'coworking': [9352],
+                'office_building': [9352],
+                'dry_cleaner': [7325],
+                'laundry': [7325],
+                'storage': [9352],
+                # ── Tourist Attractions ────────────────────────────────────────────────────
+                'tourist_attraction': [9910],
+                'landmark': [9910],
+                'monument': [9910],
+                'historic_site': [9910],
+                'tourist_information': [9910],
             }
             
             # Parse and validate categories

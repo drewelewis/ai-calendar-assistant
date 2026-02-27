@@ -321,6 +321,89 @@ async def clear_chat_history(session: ChatModels.Session):
             "message": "An error occurred while clearing chat history."
         }   
 
+@app.get("/messages")
+@trace_async_method(operation_name="api.get_messages")
+async def get_messages(session_id: str = None):
+    """Get messages from CosmosDB.
+    
+    Query parameters:
+    - session_id (optional): Specific session ID to retrieve. If omitted, returns all messages from all sessions.
+    
+    Examples:
+    - GET /messages?session_id=abc123 -> returns messages for that session
+    - GET /messages -> returns all messages from all sessions
+    """
+    logger = get_telemetry().get_logger() if get_telemetry() else None
+    if logger:
+        logger.info(f"Get messages request - session_id: {session_id if session_id else 'all sessions'}")
+    
+    try:
+        cosmos_manager = await get_cosmos_manager()
+        
+        if session_id:
+            # Query specific session - use centralized storage layer method
+            doc = await cosmos_manager.get_session_document(session_id)
+            
+            if not doc:
+                return {
+                    "session_id": session_id,
+                    "messages": [],
+                    "message_count": 0
+                }
+            
+            messages = doc.get("messages", [])
+            return {
+                "session_id": session_id,
+                "timestamp": doc.get("timestamp"),
+                "message_count": len(messages),
+                "messages": messages
+            }
+        else:
+            # Query all sessions - get latest message set from each unique session
+            query = "SELECT c.sessionId, c.messages, c.timestamp FROM c ORDER BY c.timestamp DESC"
+            result = cosmos_manager.container.query_items(
+                query=query,
+                enable_cross_partition_query=True
+            )
+            docs = list(result)
+            
+            if not docs:
+                return {
+                    "sessions": [],
+                    "total_message_count": 0,
+                    "note": "No messages found"
+                }
+            
+            # Aggregate messages by unique session, keeping most recent
+            sessions_dict = {}
+            for doc in docs:
+                sid = doc.get("sessionId")
+                if sid not in sessions_dict:  # Keep first (most recent) occurrence
+                    sessions_dict[sid] = {
+                        "session_id": sid,
+                        "timestamp": doc.get("timestamp"),
+                        "message_count": len(doc.get("messages", [])),
+                        "messages": doc.get("messages", [])
+                    }
+            
+            total_messages = sum(session["message_count"] for session in sessions_dict.values())
+            
+            return {
+                "sessions": list(sessions_dict.values()),
+                "session_count": len(sessions_dict),
+                "total_message_count": total_messages
+            }
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"Error retrieving messages: {e}\n{error_detail}")
+        return {
+            "error": "Retrieval Error",
+            "message": str(e),
+            "details": error_detail if os.getenv("ENVIRONMENT") == "development" else "Check logs for details"
+        }
+
 async def get_cosmos_manager():
     cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
     cosmos_database = os.getenv("COSMOS_DATABASE", "AIAssistant")
