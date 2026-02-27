@@ -185,5 +185,7 @@ test_redis_ports.py
 *.secrets
 *_secrets.json
 *_secrets.py
+*_env_vars.json
+old_app_env_vars.json
 temp_*.json
 test_*_auth.py
