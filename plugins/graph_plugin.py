@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import asyncio
+import json
 from typing import List, Optional, Annotated, Dict, Any
 from semantic_kernel import Kernel
 from semantic_kernel.functions import kernel_function
@@ -8,13 +9,14 @@ from semantic_kernel.functions import kernel_function
 # Import telemetry components first
 from telemetry.decorators import TelemetryContext
 from telemetry.console_output import console_info, console_debug, console_telemetry_event, console_error, console_warning
+from utils.tool_call_tracker import ToolCallTracker
 
 # Try to import the real GraphOperations, fallback to mock if it fails
 try:
     from operations.graph_operations import GraphOperations
     console_info("✓ Using Microsoft Graph Operations", module="GraphPlugin")
 except Exception as e:
-    console_error(f"⚠ Could not import GraphOperations: {e}", module="GraphPlugin")
+    console_error(f"[WARN] Could not import GraphOperations: {e}", module="GraphPlugin")
     raise
 
 
@@ -43,9 +45,16 @@ graph_operations = GraphOperations(
 max_results = 100
 
 class GraphPlugin:
-    def __init__(self, debug=False, session_id=None):
+    def __init__(self, debug=False, session_id=None, user_timezone=None):
+        import logging as _logging
+        if not user_timezone:
+            _logging.getLogger("ai-calendar-assistant").warning(
+                "user_timezone not provided to GraphPlugin — defaulting to UTC"
+            )
         self.debug = debug
         self.session_id = session_id
+        self.user_timezone = user_timezone or "UTC"
+        self._last_created_event: Optional[dict] = None  # Set after successful create; read by orchestrator for card building
 
     def _convert_to_dict(self, obj: Any) -> Any:
         """Convert Microsoft Graph objects to JSON-serializable dictionaries."""
@@ -71,6 +80,12 @@ class GraphPlugin:
 
     # Helper method to log function calls if debug is enabled
     def _log_function_call(self, function_name, **kwargs):
+        ToolCallTracker.add_call(
+            session_id=self.session_id,
+            function_name=function_name,
+            plugin_name="graph",
+            arguments=kwargs,
+        )
         if self.debug:
             params_str = ", ".join([f"{k}={repr(v)}" for k, v in kwargs.items()])
             session_info = f"[session: {self.session_id}] " if self.session_id else ""
@@ -1036,6 +1051,68 @@ class GraphPlugin:
     ############################## KERNEL FUNCTION START #####################################
     @kernel_function(
         description="""
+        Check if a user has any calendar conflicts during a proposed meeting time window.
+
+        USE THIS INSTEAD OF get_user_calendar_events when checking for scheduling conflicts
+        before creating a meeting. Returns ONLY events that truly overlap with the proposed
+        meeting time window — the Graph API handles the overlap filtering automatically.
+
+        Empty result = no conflicts → safe to proceed with creating the meeting.
+        Non-empty result = list of conflicting events → report them and ask user how to proceed.
+
+        DO NOT use get_user_calendar_events for conflict checking — it fetches too many events
+        and leads to false positives. Use this function exclusively for pre-creation conflict checks.
+
+        Parameters:
+        - user_id: Graph user GUID (must be valid)
+        - proposed_start: Exact meeting start in Eastern local time, no Z (e.g. '2026-03-10T14:30:00')
+        - proposed_end: Exact meeting end in Eastern local time, no Z (e.g. '2026-03-10T15:00:00')
+        """
+    )
+    async def check_meeting_conflicts(
+        self,
+        user_id: Annotated[str, "The user GUID to check calendar conflicts for"],
+        proposed_start: Annotated[str, "Proposed meeting start in Eastern local time, no Z (e.g. '2026-03-10T14:30:00')"],
+        proposed_end: Annotated[str, "Proposed meeting end in Eastern local time, no Z (e.g. '2026-03-10T15:00:00')"],
+    ) -> Annotated[List[dict], "List of conflicting calendar events. Empty list means no conflicts — safe to book."]:
+        self._log_function_call("check_meeting_conflicts", user_id=user_id,
+                                proposed_start=proposed_start, proposed_end=proposed_end)
+        self._send_friendly_notification("🔍 Checking for scheduling conflicts...")
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id is required")
+        if not proposed_start or not proposed_start.strip():
+            raise ValueError("proposed_start is required")
+        if not proposed_end or not proposed_end.strip():
+            raise ValueError("proposed_end is required")
+
+        try:
+            from zoneinfo import ZoneInfo
+            from datetime import timezone as _tz
+            user_tz = ZoneInfo(self.user_timezone)
+
+            # Parse as naive local time, attach the user's timezone, convert to UTC.
+            # graph_operations treats naive datetimes as UTC, so this conversion
+            # is required to query the correct time window on the Graph API.
+            naive_start = datetime.fromisoformat(proposed_start.rstrip('Z').replace('+00:00', ''))
+            naive_end   = datetime.fromisoformat(proposed_end.rstrip('Z').replace('+00:00', ''))
+            start_dt = naive_start.replace(tzinfo=user_tz).astimezone(_tz.utc)
+            end_dt   = naive_end.replace(tzinfo=user_tz).astimezone(_tz.utc)
+
+            print(f"[check_meeting_conflicts] querying {start_dt.isoformat()} – {end_dt.isoformat()} UTC (user tz: {self.user_timezone})")
+            result = await graph_operations.get_user_calendar_events_by_user_id(
+                user_id.strip(), start_dt, end_dt, iana_timezone=self.user_timezone
+            )
+            conflicts = self._convert_to_dict(result) if result else []
+            print(f"[check_meeting_conflicts] {len(conflicts)} conflict(s) found for {proposed_start} – {proposed_end} ({self.user_timezone})")
+            return conflicts
+        except Exception as e:
+            print(f"Error in check_meeting_conflicts: {e}")
+            return []
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
         Create a new calendar event/meeting in a user's Microsoft 365 calendar with attendees.
         
         USE THIS WHEN:
@@ -1059,8 +1136,8 @@ class GraphPlugin:
         
         REQUIRED INFORMATION:
         - Subject: Meeting title/description
-        - Start time: ISO 8601 format (e.g., '2025-07-15T14:00:00Z')
-        - End time: ISO 8601 format (e.g., '2025-07-15T15:00:00Z')
+        - Start time: Eastern local time, no Z, no offset (e.g., '2026-03-11T14:00:00' for 2:00 PM Eastern)
+        - End time: Eastern local time, no Z, no offset (e.g., '2026-03-11T15:00:00' for 3:00 PM Eastern)
         - Organizer user ID: Who creates/owns the meeting
         
         OPTIONAL DETAILS:
@@ -1069,9 +1146,9 @@ class GraphPlugin:
         - Optional attendees: Email addresses of optional participants
         - Body: Detailed description, agenda, or other event information (supports HTML formatting)
         
-        TIME FORMAT EXAMPLES:
-        - "2025-07-15T14:00:00Z" = July 15, 2025, 2:00 PM UTC
-        - "2025-07-20T09:30:00Z" = July 20, 2025, 9:30 AM UTC
+        TIME FORMAT EXAMPLES (EASTERN LOCAL — NO Z, NO UTC CONVERSION):
+        - '2026-03-11T14:00:00' = 2:00 PM Eastern on March 11 (do NOT append Z)
+        - '2026-07-20T09:30:00' = 9:30 AM Eastern on July 20 (do NOT append Z)
         
         ATTENDEE MANAGEMENT:
         - Required attendees get "required" invitation type
@@ -1086,7 +1163,7 @@ class GraphPlugin:
         NOTE: Organizer must have calendar creation permissions
         """
     )
-    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time of the event in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the event in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, recurrence_type: Annotated[Optional[str], "Optional. Recurrence pattern type: daily, weekly, or absoluteMonthly. Omit for non-recurring events."] = None, recurrence_interval: Annotated[Optional[int], "Optional. How often the pattern repeats: 1 means every week/day/month, 2 means every other, etc."] = None, recurrence_days: Annotated[Optional[str], "Optional. For weekly recurrence only — comma-separated days: monday, tuesday, wednesday, thursday, friday, saturday, sunday."] = None, recurrence_end_type: Annotated[Optional[str], "Optional. How the recurrence ends: noEnd (runs forever), endDate (stops on a date), numbered (fixed number of occurrences)."] = None, recurrence_end_date: Annotated[Optional[str], "Optional. Required when recurrence_end_type is endDate. End date in YYYY-MM-DD format."] = None, recurrence_occurrences: Annotated[Optional[int], "Optional. Required when recurrence_end_type is numbered. Total number of occurrences."] = None, recurrence_start_date: Annotated[Optional[str], "Optional. The date of the very first occurrence in YYYY-MM-DD format. Required when any recurrence field is set."] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
+    async def create_calendar_event(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the event will be created"], subject: Annotated[str, "The subject/title of the calendar event"], start: Annotated[str, "Start date and time in Eastern local time, ISO 8601 format WITHOUT 'Z' or UTC offset (e.g., '2026-03-11T11:00:00' for 11:00 AM Eastern). Do NOT convert to UTC."], end: Annotated[str, "End date and time in Eastern local time, ISO 8601 format WITHOUT 'Z' or UTC offset (e.g., '2026-03-11T12:00:00' for 12:00 PM Eastern). Do NOT convert to UTC."], location: Annotated[str, "Optional location for the event"] = None, body: Annotated[str, "Optional detailed description/agenda for the event (supports HTML formatting)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, recurrence_type: Annotated[Optional[str], "Optional. Recurrence pattern type: daily, weekly, or absoluteMonthly. Omit for non-recurring events."] = None, recurrence_interval: Annotated[Optional[int], "Optional. How often the pattern repeats: 1 means every week/day/month, 2 means every other, etc."] = None, recurrence_days: Annotated[Optional[str], "Optional. For weekly recurrence only — comma-separated days: monday, tuesday, wednesday, thursday, friday, saturday, sunday."] = None, recurrence_end_type: Annotated[Optional[str], "Optional. How the recurrence ends: noEnd (runs forever), endDate (stops on a date), numbered (fixed number of occurrences)."] = None, recurrence_end_date: Annotated[Optional[str], "Optional. Required when recurrence_end_type is endDate. End date in YYYY-MM-DD format."] = None, recurrence_occurrences: Annotated[Optional[int], "Optional. Required when recurrence_end_type is numbered. Total number of occurrences."] = None, recurrence_start_date: Annotated[Optional[str], "Optional. The date of the very first occurrence in YYYY-MM-DD format. Required when any recurrence field is set."] = None) -> Annotated[dict, "Returns information about the created calendar event."]:
         self._log_function_call("create_calendar_event", user_id=user_id, subject=subject, start=start, end=end,
                               location=location, body=body, attendees=attendees, optional_attendees=optional_attendees,
                               recurrence_type=recurrence_type, recurrence_interval=recurrence_interval, recurrence_days=recurrence_days,
@@ -1118,10 +1195,24 @@ class GraphPlugin:
         try:
             result = await graph_operations.create_calendar_event(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
-                location, body, attendees, optional_attendees, recurrence=recurrence_dict
+                location, body, attendees, optional_attendees, recurrence=recurrence_dict,
+                iana_timezone=self.user_timezone
             )
             if result:
-                return self._convert_to_dict(result)
+                result_dict = self._convert_to_dict(result)
+                # LOG OUTPUT: Structured meeting data
+                if self.session_id:
+                    meeting_info = {
+                        "subject": result_dict.get("subject"),
+                        "start": result_dict.get("start"),
+                        "end": result_dict.get("end"),
+                        "attendees": result_dict.get("attendees", []),
+                        "location": result_dict.get("location")
+                    }
+                    print(f"[TOOL_OUTPUT] create_calendar_event: {json.dumps(meeting_info, default=str)}")
+                
+                self._last_created_event = result_dict  # Expose for orchestrator card rendering
+                return result_dict
             else:
                 return {"status": "failed", "error": "Event creation returned no result — check the container logs for Graph API error details."}
         except Exception as e:
@@ -1173,9 +1264,9 @@ class GraphPlugin:
         - Can be combined with physical location for hybrid meetings
         - Override location if user specifies a different preference
         
-        TIME FORMAT EXAMPLES:
-        - "2025-07-15T14:00:00Z" = July 15, 2025, 2:00 PM UTC
-        - "2025-07-20T09:30:00Z" = July 20, 2025, 9:30 AM UTC
+        TIME FORMAT EXAMPLES (EASTERN LOCAL — NO Z, NO UTC CONVERSION):
+        - '2026-03-11T14:00:00' = 2:00 PM Eastern on March 11 (do NOT append Z)
+        - '2026-07-20T09:30:00' = 9:30 AM Eastern on July 20 (do NOT append Z)
         
         ATTENDEE MANAGEMENT:
         - All attendees receive Teams meeting link in their invite
@@ -1192,7 +1283,7 @@ class GraphPlugin:
         NOTE: Organizer must have Teams and Exchange Online licenses
         """
     )
-    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T14:00:00Z')"], end: Annotated[str, "End date and time of the meeting in ISO 8601 format (e.g., '2025-07-15T15:00:00Z')"], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None, recurrence_type: Annotated[Optional[str], "Optional. Recurrence pattern type: daily, weekly, or absoluteMonthly. Omit for non-recurring meetings."] = None, recurrence_interval: Annotated[Optional[int], "Optional. How often the pattern repeats: 1 means every week/day/month, 2 means every other, etc."] = None, recurrence_days: Annotated[Optional[str], "Optional. For weekly recurrence only — comma-separated days: monday, tuesday, wednesday, thursday, friday, saturday, sunday."] = None, recurrence_end_type: Annotated[Optional[str], "Optional. How the recurrence ends: noEnd (runs forever), endDate (stops on a date), numbered (fixed number of occurrences)."] = None, recurrence_end_date: Annotated[Optional[str], "Optional. Required when recurrence_end_type is endDate. End date in YYYY-MM-DD format."] = None, recurrence_occurrences: Annotated[Optional[int], "Optional. Required when recurrence_end_type is numbered. Total number of occurrences."] = None, recurrence_start_date: Annotated[Optional[str], "Optional. The date of the very first occurrence in YYYY-MM-DD format. Required when any recurrence field is set."] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
+    async def create_teams_meeting(self, user_id: Annotated[str, "The unique user ID (GUID) of the user in whose calendar the Teams meeting will be created"], subject: Annotated[str, "The subject/title of the Teams meeting"], start: Annotated[str, "Start date and time in Eastern local time, ISO 8601 format WITHOUT 'Z' or UTC offset (e.g., '2026-03-11T11:00:00' for 11:00 AM Eastern). Do NOT convert to UTC."], end: Annotated[str, "End date and time in Eastern local time, ISO 8601 format WITHOUT 'Z' or UTC offset (e.g., '2026-03-11T12:00:00' for 12:00 PM Eastern). Do NOT convert to UTC."], body: Annotated[str, "Optional detailed description/agenda for the meeting (will be enhanced with Teams meeting info)"] = None, attendees: Annotated[List[str], "Optional list of required attendee email addresses"] = None, optional_attendees: Annotated[List[str], "Optional list of optional attendee email addresses"] = None, location: Annotated[str, "Optional additional location info (will be combined with Teams meeting)"] = None, recurrence_type: Annotated[Optional[str], "Optional. Recurrence pattern type: daily, weekly, or absoluteMonthly. Omit for non-recurring meetings."] = None, recurrence_interval: Annotated[Optional[int], "Optional. How often the pattern repeats: 1 means every week/day/month, 2 means every other, etc."] = None, recurrence_days: Annotated[Optional[str], "Optional. For weekly recurrence only — comma-separated days: monday, tuesday, wednesday, thursday, friday, saturday, sunday."] = None, recurrence_end_type: Annotated[Optional[str], "Optional. How the recurrence ends: noEnd (runs forever), endDate (stops on a date), numbered (fixed number of occurrences)."] = None, recurrence_end_date: Annotated[Optional[str], "Optional. Required when recurrence_end_type is endDate. End date in YYYY-MM-DD format."] = None, recurrence_occurrences: Annotated[Optional[int], "Optional. Required when recurrence_end_type is numbered. Total number of occurrences."] = None, recurrence_start_date: Annotated[Optional[str], "Optional. The date of the very first occurrence in YYYY-MM-DD format. Required when any recurrence field is set."] = None) -> Annotated[dict, "Returns information about the created Teams meeting and calendar event."]:
         self._log_function_call("create_teams_meeting", user_id=user_id, subject=subject, start=start, end=end,
                               body=body, attendees=attendees, optional_attendees=optional_attendees, location=location,
                               recurrence_type=recurrence_type, recurrence_interval=recurrence_interval, recurrence_days=recurrence_days,
@@ -1225,10 +1316,23 @@ class GraphPlugin:
             result = await graph_operations.create_calendar_event_with_teams(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
                 location, body, attendees, optional_attendees, create_teams_meeting=True,
-                recurrence=recurrence_dict
+                recurrence=recurrence_dict, iana_timezone=self.user_timezone
             )
             if result:
-                return self._convert_to_dict(result)
+                result_dict = self._convert_to_dict(result)
+                # LOG OUTPUT: Structured meeting data
+                if self.session_id:
+                    meeting_info = {
+                        "subject": result_dict.get("subject"),
+                        "start": result_dict.get("start"),
+                        "end": result_dict.get("end"),
+                        "attendees": result_dict.get("attendees", []),
+                        "location": result_dict.get("location")
+                    }
+                    print(f"[TOOL_OUTPUT] create_teams_meeting: {json.dumps(meeting_info, default=str)}")
+                
+                self._last_created_event = result_dict  # Expose for orchestrator card rendering
+                return result_dict
             else:
                 return {"status": "failed", "error": "Meeting creation returned no result — check the container logs for Graph API error details."}
         except Exception as e:
@@ -1291,7 +1395,8 @@ class GraphPlugin:
             result = await graph_operations.create_calendar_event_with_online_meeting(
                 user_id.strip(), subject.strip(), start.strip(), end.strip(),
                 location, body, attendees, optional_attendees, 
-                create_online_meeting=True, meeting_platform='zoom'
+                create_online_meeting=True, meeting_platform='zoom',
+                iana_timezone=self.user_timezone
             )
             return self._convert_to_dict(result) if result else {}
         except Exception as e:
@@ -1348,11 +1453,88 @@ class GraphPlugin:
             result = await graph_operations.create_calendar_event_with_online_meeting(
                 user_id, subject, start, end, location, body, 
                 attendees, optional_attendees, 
-                create_online_meeting=True, meeting_platform=platform
+                create_online_meeting=True, meeting_platform=platform,
+                iana_timezone=self.user_timezone
             )
             return self._convert_to_dict(result) if result else {}
         except Exception as e:
             print(f"Error in create_online_meeting: {e}")
+            return {"error": str(e), "status": "failed"}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Update (patch) an existing calendar event — use this to reschedule, rename, or change location.
+
+        USE THIS WHEN:
+        - User says "reschedule", "move", "change the time", "rename", "update" a meeting
+        - Any modification to an existing event — NEVER create a new event for a reschedule
+        - You must provide the event_id from a prior get_user_calendar_events call
+
+        RESCHEDULE WORKFLOW:
+        1. Call get_user_calendar_events to find the event and get its id
+        2. Call update_calendar_event with that id and the new start/end times
+        3. Do NOT call create_calendar_event — that creates a duplicate
+
+        TIME FORMAT: Eastern local time, no Z, no UTC offset (e.g., '2026-03-11T14:00:00')
+        """
+    )
+    async def update_calendar_event(
+        self,
+        user_id: Annotated[str, "The unique user ID (GUID) of the calendar owner"],
+        event_id: Annotated[str, "The event ID from a prior calendar query — required"],
+        start: Annotated[str, "New start time in Eastern local time, no Z (e.g., '2026-03-11T14:00:00'). Omit to keep existing."] = None,
+        end: Annotated[str, "New end time in Eastern local time, no Z (e.g., '2026-03-11T15:00:00'). Omit to keep existing."] = None,
+        subject: Annotated[str, "New subject/title. Omit to keep existing."] = None,
+        location: Annotated[str, "New location. Omit to keep existing."] = None,
+        body: Annotated[str, "New HTML body. Omit to keep existing."] = None,
+    ) -> Annotated[dict, "Returns the updated event, or an error dict."]:
+        self._log_function_call("update_calendar_event", user_id=user_id, event_id=event_id,
+                                start=start, end=end, subject=subject, location=location)
+        self._send_friendly_notification("✏️ Updating calendar event...")
+        if not user_id or not user_id.strip(): raise ValueError("user_id is required")
+        if not event_id or not event_id.strip(): raise ValueError("event_id is required")
+        try:
+            result = await graph_operations.update_calendar_event(user_id.strip(), event_id.strip(), start, end, subject, location, body, iana_timezone=self.user_timezone)
+            return self._convert_to_dict(result) if result else {"error": "Update failed", "status": "failed"}
+        except Exception as e:
+            print(f"Error in update_calendar_event: {e}")
+            return {"error": str(e), "status": "failed"}
+    ############################## KERNEL FUNCTION END #######################################
+
+    ############################## KERNEL FUNCTION START #####################################
+    @kernel_function(
+        description="""
+        Delete a calendar event by its ID.
+
+        USE THIS WHEN:
+        - User says "delete", "remove", "cancel", or "get rid of" a meeting
+        - Removing a duplicate event (e.g., after a reschedule created an extra copy)
+        - You must have the event_id from a prior get_user_calendar_events call
+
+        WORKFLOW:
+        1. Call get_user_calendar_events to find the event and get its id
+        2. Confirm with the user which event to delete if ambiguous
+        3. Call delete_calendar_event with that id
+        """
+    )
+    async def delete_calendar_event(
+        self,
+        user_id: Annotated[str, "The unique user ID (GUID) of the calendar owner"],
+        event_id: Annotated[str, "The event ID to delete — from a prior calendar query"],
+    ) -> Annotated[dict, "Returns {'status': 'deleted'} on success or an error dict."]:
+        self._log_function_call("delete_calendar_event", user_id=user_id, event_id=event_id)
+        self._send_friendly_notification("🗑️ Removing calendar event...")
+        if not user_id or not user_id.strip(): raise ValueError("user_id is required")
+        if not event_id or not event_id.strip(): raise ValueError("event_id is required")
+        try:
+            success = await graph_operations.delete_calendar_event(user_id.strip(), event_id.strip())
+            if success:
+                return {"status": "deleted", "event_id": event_id}
+            return {"error": "Delete failed", "status": "failed"}
+        except Exception as e:
+            print(f"Error in delete_calendar_event: {e}")
             return {"error": str(e), "status": "failed"}
     ############################## KERNEL FUNCTION END #######################################
 

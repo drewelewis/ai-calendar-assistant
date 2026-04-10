@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-calendar-assistant"
-version = "1.106.0"
+version = "1.170.0"
 description = "Azure OpenAI powered calendar assistant with Microsoft Graph integration and multi-agent orchestration"
 readme = "README.md"
 license = {text = "MIT"}
@@ -34,7 +34,9 @@ requires-python = ">=3.8"
 dependencies = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.24.0",
-    "semantic-kernel>=1.0.0",
+    # "semantic-kernel>=1.0.0",  # Migrating to Agent Framework
+    "agent-framework>=0.1.0",
+    "azure-ai-agents>=0.1.0",
     "azure-identity>=1.15.0",
     "azure-cosmos>=4.5.0",
     "aiohttp>=3.9.0",
@@ -161,8 +163,8 @@ exclude_lines = [
 
 # Project-specific metadata (custom section)
 [tool.ai-calendar-assistant]
-version = "1.106.0"
-release_date = "2026-02-26"
+version = "1.170.0"
+release_date = "2026-03-11"
 
 [tool.ai-calendar-assistant.features]
 single_agent = true

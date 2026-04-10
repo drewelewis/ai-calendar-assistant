@@ -4,6 +4,7 @@ from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.functions import KernelArguments
 
 from plugins.azure_maps_plugin import AzureMapsPlugin
+from plugins.card_plugin import CardPlugin
 from plugins.graph_plugin import GraphPlugin
 
 
@@ -22,6 +23,7 @@ def create_location_agent(
     kernel.add_service(shared_service)
     kernel.add_plugin(AzureMapsPlugin(debug=False, session_id=session_id), plugin_name="azure_maps")
     kernel.add_plugin(GraphPlugin(debug=False, session_id=session_id), plugin_name="graph")
+    kernel.add_plugin(CardPlugin(), plugin_name="cards")
 
     instructions = f"""
 You are the Location Agent, specialized in location-based searches using Azure Maps.
@@ -60,13 +62,29 @@ CAPABILITIES:
 - Brand/franchise searches (e.g., Starbucks, McDonald's, Hilton)
 - Geographic area searches by country or region
 - Geocoding — converting a city/address to coordinates
+- Landmark/neighborhood resolution — converting a place name to city/state/zip
 
 AVAILABLE FUNCTIONS:
+- resolve_landmark: Convert a landmark or neighborhood to city/state/zip (use FIRST when the user gives a landmark or neighborhood instead of a city)
 - search_nearby_locations: General nearby POI search (no category filter)
 - search_by_category: Category-filtered search — use this for typed searches
 - search_by_brand: Find a specific franchise or chain
 - search_by_region: Search across a country or large area
 - get_available_categories: Return the full list of supported category names
+
+LANDMARK / NEIGHBORHOOD WORKFLOW — CRITICAL:
+- Use your world knowledge to resolve landmarks to city/state. You already know:
+    Times Square → New York, NY
+    Fenway Park → Boston, MA
+    The Strip → Las Vegas, NV
+    SoHo → New York, NY
+    French Quarter → New Orleans, LA
+    Wrigley Field → Chicago, IL
+- CORRECT call: geolocate_city_state(city="New York", state="NY", neighborhood="Times Square")
+- WRONG call:   geolocate_city_state(city="Times Square", state="NY")  ← NEVER do this
+- NEVER pass a landmark or neighborhood as the city parameter.
+- Always put the city in city=, the state in state=, and any landmark/neighborhood in neighborhood=.
+- Only call resolve_landmark if you genuinely do not know what city a place is in.
 
 SUPPORTED POI CATEGORIES — map any user phrasing to the closest key:
 Food & Dining: restaurant, fast_food, pizza, sushi, bakery, diner, buffet, seafood_restaurant, steak_house,
@@ -98,11 +116,24 @@ WORKFLOW:
 4. Present results with: name, address, phone, distance, website
 5. Offer to refine (larger radius, adjacent category) if sparse results
 
-RESPONSE FORMAT:
-- Lead with: "Found X [category] within [radius] of [location]:"
-- Number each result
-- Include address, phone, and distance for each
-- If 0 results: explain and suggest alternatives
+CARD RESPONSE — REQUIRED AFTER SUCCESSFUL SEARCH:
+After calling search_by_category, search_nearby_locations, or search_by_brand and receiving results:
+  1. Call cards-build_location_card with:
+       results_json: a JSON array of result objects — each with name, address, phone, distance
+       query:        the user's original search text (e.g. "coffee shops near Canary Wharf")
+  2. In your JSON response: set "cards" to the card array returned by the tool,
+     and set "message" to a brief summary (e.g. "Found 5 coffee shops near Canary Wharf.").
+
+Include name, address, phone, and distance in each results_json entry where available.
+
+RESPONSE FORMAT — MANDATORY:
+Every response MUST be valid JSON:
+  {{"message": "...", "cards": []}}
+
+Search results          : {{"message": "Found 5 results near Canary Wharf.", "cards": [<card from build_location_card>]}}
+Clarifying / 0 results  : {{"message": "Which city should I search in?", "cards": []}}
+
+NEVER output plain text — always the JSON envelope.
 
 Session ID: {session_id}
 """.strip()

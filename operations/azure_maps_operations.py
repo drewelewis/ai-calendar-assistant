@@ -689,6 +689,69 @@ class AzureMapsOperations:
                 console_error(f"Fuzzy search failed: {response.status} — {error_text[:200]}", "AzureMaps")
                 raise Exception(f"Fuzzy search failed: {response.status}")
             
+    async def resolve_landmark(self, landmark: str) -> Optional[Dict[str, Any]]:
+        """
+        Resolve a freeform landmark, neighborhood, or place name to structured
+        city / state / zip using Azure Maps fuzzy geocoding (no lat/lon required).
+
+        Returns a dict with keys: city, state, zip, formatted_address
+        or None if the lookup fails.
+        """
+        console_info(f"🏛️ Resolving landmark to city/state/zip: '{landmark}'", "AzureMaps")
+
+        params = {
+            "api-version": "1.0",
+            "query": landmark,
+            "limit": 1,
+            "countrySet": "US",
+            "language": "en-US",
+        }
+        headers = {}
+
+        if self.subscription_key:
+            params["subscription-key"] = self.subscription_key
+        else:
+            try:
+                credential = DefaultAzureCredential()
+                token = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: credential.get_token("https://atlas.microsoft.com/.default")
+                )
+                headers["Authorization"] = f"Bearer {token.token}"
+                if self.client_id:
+                    headers["x-ms-client-id"] = self.client_id
+                else:
+                    console_error("Missing AZURE_MAPS_CLIENT_ID for managed identity", "AzureMaps")
+            except Exception as e:
+                console_error(f"Token acquisition failed in resolve_landmark: {e}", "AzureMaps")
+                return None
+
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+        url = f"{self.base_url}/search/fuzzy/json"
+        try:
+            async with self.session.get(url, headers=headers, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get("results", [])
+                    if not results:
+                        console_warning(f"No results resolving landmark '{landmark}'", "AzureMaps")
+                        return None
+                    addr = results[0].get("address", {})
+                    city = addr.get("municipality") or addr.get("municipalitySubdivision", "")
+                    state = addr.get("countrySubdivision", "")
+                    zip_code = addr.get("postalCode", "")
+                    formatted = addr.get("freeformAddress", f"{city}, {state} {zip_code}").strip()
+                    console_info(f"   • Resolved to: {formatted}", "AzureMaps")
+                    return {"city": city, "state": state, "zip": zip_code, "formatted_address": formatted}
+                else:
+                    error_text = await response.text()
+                    console_error(f"resolve_landmark failed: HTTP {response.status} — {error_text[:200]}", "AzureMaps")
+                    return None
+        except Exception as e:
+            console_error(f"Exception in resolve_landmark: {e}", "AzureMaps")
+            return None
+
     @trace_async_method("geolocate_city_state")
     async def geolocate_city_state(self, city: str, state: str, neighborhood: str = None) -> Optional[Dict[str, Any]]:
         """
@@ -720,7 +783,7 @@ class AzureMapsOperations:
         if self.subscription_key:
             # Use subscription key as URL parameter
             params["subscription-key"] = self.subscription_key
-            console_info("🔑 Using subscription key authentication for geocoding", "AzureMaps")
+            console_info(f"🔑 Using subscription key auth (key starts with: {self.subscription_key[:8]}...)", "AzureMaps")
         else:
             # Use managed identity with Authorization header
             console_info("🔐 Attempting managed identity authentication for geocoding...", "AzureMaps")
@@ -798,31 +861,34 @@ class AzureMapsOperations:
         if not self.session:
             self.session = aiohttp.ClientSession()
 
-        # Use the search/address/json endpoint which is more reliable for city/state geocoding
-        url = f"{self.base_url}/search/address/json"
+        # Use /search/fuzzy/json — handles city/state AND landmarks/POIs (e.g. "Times Square, NY")
+        url = f"{self.base_url}/search/fuzzy/json"
         
         console_info(f"🌐 Making Azure Maps API request:", "AzureMaps")
         console_info(f"   • URL: {url}", "AzureMaps")
         console_info(f"   • Query: {params['query']}", "AzureMaps")
+        console_info(f"   • All params (excl key): { {k:v for k,v in params.items() if k != 'subscription-key'} }", "AzureMaps")
         console_info(f"   • Auth method: {'Subscription Key' if self.subscription_key else 'Managed Identity (Bearer Token)'}", "AzureMaps")
-        console_info(f"   • Headers: {list(headers.keys())}", "AzureMaps")
-        console_info(f"   • Parameters: {list(params.keys())}", "AzureMaps")
+        console_info(f"   • Headers sent: {list(headers.keys())}", "AzureMaps")
 
         try:
             async with self.session.get(url, headers=headers, params=params) as response:
                 console_info(f"📡 API Response received: HTTP {response.status}", "AzureMaps")
                 
                 if response.status == 200:
-                    result = await response.json()
-                    console_info(f"✅ Successfully geocoded {city}, {state}", "AzureMaps")
+                    raw_text = await response.text()
+                    console_info(f"   • Raw response (first 500 chars): {raw_text[:500]}", "AzureMaps")
+                    import json as _json
+                    result = _json.loads(raw_text)
+                    console_info(f"✅ HTTP 200 from Azure Maps for query: '{query}'", "AzureMaps")
                     
                     # Check if we have results
                     results = result.get('results', [])
                     console_info(f"   • Results found: {len(results)}", "AzureMaps")
                     
                     if not results:
-                        console_warning(f"No geocoding results found for {city}, {state}", "AzureMaps")
-                        return None
+                        console_error(f"❌ Zero results for '{query}' — full response: {raw_text[:1000]}", "AzureMaps")
+                        raise Exception(f"Azure Maps returned zero results for '{query}'. The location may be too vague or unrecognised.")
                     
                     # Transform the result to match the expected format
                     best_match = results[0]
@@ -850,44 +916,20 @@ class AzureMapsOperations:
                     console_debug(f"Transformed geocoding result: {transformed_result}", "AzureMaps")
                     return transformed_result
                     
-                elif response.status == 404:
-                    error_text = await response.text()
-                    console_error(f"❌ Azure Maps API endpoint not found (404)", "AzureMaps")
-                    console_error(f"   • Response: {error_text}", "AzureMaps")
-                    console_error(f"   • URL used: {url}", "AzureMaps")
-                    console_error("   💡 Check API endpoint URL is correct", "AzureMaps")
-                    return None
                 elif response.status == 401:
                     error_text = await response.text()
                     console_error(f"❌ Azure Maps authentication failed (401)", "AzureMaps")
                     console_error(f"   • Response: {error_text}", "AzureMaps")
-                    console_error(f"   • Auth method: {'Subscription Key' if self.subscription_key else 'Managed Identity'}", "AzureMaps")
-                    if not self.subscription_key:
-                        console_error("   💡 Managed identity authentication issues:", "AzureMaps")
-                        console_error("     - Token may be invalid or expired", "AzureMaps")
-                        console_error("     - Check managed identity is properly configured", "AzureMaps")
-                        console_error("     - Verify token scope: https://atlas.microsoft.com/.default", "AzureMaps")
-                    else:
-                        console_error("   💡 Subscription key authentication issues:", "AzureMaps")
-                        console_error("     - Check subscription key is valid", "AzureMaps")
-                        console_error("     - Verify Azure Maps account is active", "AzureMaps")
-                    return None
+                    raise Exception(f"Azure Maps authentication failed (401) — managed identity token was rejected. Check that the managed identity has the 'Azure Maps Data Reader' role assigned. Response: {error_text[:300]}")
                 elif response.status == 403:
                     error_text = await response.text()
                     console_error(f"❌ Azure Maps access forbidden (403)", "AzureMaps")
                     console_error(f"   • Response: {error_text}", "AzureMaps")
-                    console_error(f"   • Auth method: {'Subscription Key' if self.subscription_key else 'Managed Identity'}", "AzureMaps")
-                    if not self.subscription_key:
-                        console_error("   💡 Managed identity permission issues:", "AzureMaps")
-                        console_error("     - Check 'Azure Maps Data Reader' role is assigned", "AzureMaps")
-                        console_error("     - Verify role assignment scope includes Azure Maps account", "AzureMaps")
-                        console_error("     - Wait 5-10 minutes for role propagation", "AzureMaps")
-                        console_error(f"     - Identity: 5238e629-da2f-4bb0-aea5-14d45526c864", "AzureMaps")
-                    else:
-                        console_error("   💡 Subscription permission issues:", "AzureMaps")
-                        console_error("     - Check Azure Maps subscription status", "AzureMaps")
-                        console_error("     - Verify quota and billing", "AzureMaps")
-                    return None
+                    raise Exception(f"Azure Maps access forbidden (403) — managed identity lacks permission. Assign the 'Azure Maps Data Reader' role to the container app's managed identity. Response: {error_text[:300]}")
+                elif response.status == 404:
+                    error_text = await response.text()
+                    console_error(f"❌ Azure Maps API endpoint not found (404): {url}", "AzureMaps")
+                    raise Exception(f"Azure Maps endpoint not found (404): {url}")
                 else:
                     error_text = await response.text()
                     console_error(f"❌ Unexpected response (HTTP {response.status})", "AzureMaps")

@@ -78,7 +78,7 @@ class TelemetryConfig:
             
         except Exception as e:
             print(f"Failed to configure telemetry: {e}")
-            print("⚠️  TELEMETRY CONFIGURATION FAILED")
+            print("[WARN] TELEMETRY CONFIGURATION FAILED")
             print("   The application will continue running, but telemetry data will not be collected.")
             print("   This may affect monitoring and debugging capabilities in production.")
             print("   Check Application Insights connection string and authentication settings.")

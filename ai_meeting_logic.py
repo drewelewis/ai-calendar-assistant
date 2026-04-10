@@ -107,7 +107,7 @@ When a user requests meeting creation, analyze the request to determine the appr
 if __name__ == "__main__":
     examples = ai_meeting_decision_logic()
     
-    print("🤖 AI Meeting Decision Logic Examples")
+    print("AI Meeting Decision Logic Examples")
     print("=" * 50)
     
     for i, example in enumerate(examples, 1):
@@ -122,5 +122,5 @@ if __name__ == "__main__":
         if 'additional_params' in example['analysis']:
             print(f"Additional Parameters: {example['analysis']['additional_params']}")
     
-    print(f"\n📋 AI Decision Prompt:")
+    print(f"\nAI Decision Prompt:")
     print(AI_MEETING_CREATION_PROMPT)

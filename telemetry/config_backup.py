@@ -110,7 +110,7 @@ class TelemetryConfig:
             return True
             
         except Exception as e:
-            print(f"❌ Failed to configure OpenTelemetry: {e}")
+            print(f"[ERROR] Failed to configure OpenTelemetry: {e}")
             return False
     
     def _configure_manual_exporters(self, resource: Resource):

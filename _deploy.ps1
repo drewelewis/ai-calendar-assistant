@@ -26,7 +26,7 @@ $env:PYTHONUTF8 = "1"
 $PYTHON = if (Test-Path ".\.venv\Scripts\python.exe") { ".\.venv\Scripts\python.exe" } else { "python" }
 $IMAGE_NAME    = "ai-calendar-assistant"
 $DOCKERHUB_USER = "drewl"
-$ACA_NAME      = "aiwrapper"
+$ACA_NAME      = "aiwrapper-private"
 $RESOURCE_GROUP = "devops-ai-rg"
 
 function Write-Step($msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
@@ -82,6 +82,7 @@ $result = az containerapp update `
     --name $ACA_NAME `
     --resource-group $RESOURCE_GROUP `
     --image "${DOCKERHUB_USER}/${IMAGE_NAME}:${VERSION}" `
+    --set-env-vars "APP_VERSION=${VERSION}" `
     --query "{revision:properties.latestRevisionName, state:properties.provisioningState, image:properties.template.containers[0].image}" `
     -o json | ConvertFrom-Json
 

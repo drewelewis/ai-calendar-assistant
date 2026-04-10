@@ -6,13 +6,14 @@ from semantic_kernel.functions import kernel_function
 # Import telemetry components first
 from telemetry.decorators import TelemetryContext
 from telemetry.console_output import console_info, console_debug, console_telemetry_event, console_error, console_warning
+from utils.tool_call_tracker import ToolCallTracker
 
 # Import the Azure Maps Operations
 try:
     from operations.azure_maps_operations import AzureMapsOperations
     console_info("✓ Using Azure Maps Search Operations", module="AzureMapsPlugin")
 except Exception as e:
-    console_error(f"⚠ Could not import AzureMapsOperations: {e}", module="AzureMapsPlugin")
+    console_error(f"[WARN] Could not import AzureMapsOperations: {e}", module="AzureMapsPlugin")
     raise
 
 try:
@@ -77,6 +78,12 @@ class AzureMapsPlugin:
     
     def _log_function_call(self, function_name, **kwargs):
         """Log function calls if debug is enabled."""
+        ToolCallTracker.add_call(
+            session_id=self.session_id,
+            function_name=function_name,
+            plugin_name="azure_maps",
+            arguments=kwargs,
+        )
         if self.debug:
             console_debug(f"🔍 Function called: {function_name}", module="AzureMapsPlugin")
             for key, value in kwargs.items():
@@ -1065,16 +1072,67 @@ class AzureMapsPlugin:
     
     @kernel_function(
         description="""
-        Get geographical coordinates (latitude and longitude) for a city and state using Azure Maps geocoding.
+        Resolve a landmark, neighborhood, or freeform place name to a structured city, state, and zip code.
+
+        USE THIS ONLY AS A LAST RESORT when you genuinely do not know what city a landmark is in.
+        For well-known landmarks (Times Square, Fenway Park, SoHo, etc.) use your world knowledge
+        directly — call geolocate_city_state(city="New York", state="NY", neighborhood="Times Square")
+        instead of calling this function.
+
+        EXAMPLES where resolve_landmark is appropriate:
+        - An obscure local venue name you don't recognize
+        - An ambiguous name that could be in multiple cities
+
+        EXAMPLES where you should NOT call resolve_landmark (use world knowledge instead):
+        - Times Square → geolocate_city_state(city="New York", state="NY", neighborhood="Times Square")
+        - Fenway Park  → geolocate_city_state(city="Boston", state="MA", neighborhood="Fenway Park")
+        - The Strip    → geolocate_city_state(city="Las Vegas", state="NV", neighborhood="The Strip")
+        - SoHo         → geolocate_city_state(city="New York", state="NY", neighborhood="SoHo")
+        """
+    )
+    async def resolve_landmark(self,
+                               landmark: Annotated[str, "Freeform landmark, neighborhood, or place name to resolve (e.g. 'Times Square', 'Fenway Park', 'SoHo', 'The French Quarter')"]) -> str:
+        """
+        Resolve a landmark or neighborhood to a structured city/state/zip.
+        """
+        self._log_function_call("resolve_landmark", landmark=landmark)
+        try:
+            search_client = await self._get_search_client()
+            self._send_friendly_notification(f"🏛️ Resolving '{landmark}' to city/state/zip...")
+            result = await search_client.resolve_landmark(landmark)
+            if not result:
+                return f"Could not resolve '{landmark}' to a city/state. Try providing the city and state directly."
+            city = result.get("city", "")
+            state = result.get("state", "")
+            zip_code = result.get("zip", "")
+            formatted = result.get("formatted_address", f"{city}, {state} {zip_code}").strip()
+            return (
+                f"Resolved '{landmark}' to:\n"
+                f"  City:    {city}\n"
+                f"  State:   {state}\n"
+                f"  Zip:     {zip_code}\n"
+                f"  Address: {formatted}\n"
+                f"Now call geolocate_city_state(city='{city}', state='{state}') to get coordinates."
+            )
+        except Exception as e:
+            error_msg = f"Error resolving landmark '{landmark}': {str(e)}"
+            console_error(error_msg, module="AzureMapsPlugin")
+            return f"Sorry, I couldn't resolve '{landmark}': {str(e)}"
+
+    @kernel_function(
+        description="""
+        Get geographical coordinates (latitude and longitude) for a city, neighborhood, or landmark using Azure Maps geocoding.
         
         USE THIS WHEN:
         - User provides a city and state and needs coordinates
         - Converting location names to lat/lng for other location services
         - User asks "where is [city], [state]?" or "what are the coordinates of [city]?"
         - Need to find the exact location of a place for mapping or distance calculations
+        - User mentions a landmark or neighborhood (e.g., Times Square, SoHo, Midtown Manhattan)
         
         CAPABILITIES:
         - Converts city/state combinations to precise coordinates
+        - Handles landmarks, neighborhoods, and districts (Times Square, SoHo, etc.)
         - Returns detailed location information including formatted addresses
         - Supports US cities and states with high accuracy
         - Provides additional location metadata when available
@@ -1084,11 +1142,20 @@ class AzureMapsPlugin:
         - "Where exactly is Austin, Texas located?"
         - "Get the lat/lng for Portland, Oregon"
         - "Find the location of Miami, Florida"
+        - "Where is Times Square?"
+        
+        PARAMETER GUIDANCE:
+        - city: The actual city name ONLY — e.g. "New York", "Boston", "Seattle". Never a landmark.
+        - state: The state abbreviation or full name — e.g. "NY", "MA", "WA".
+        - neighborhood: Put landmarks and neighborhoods here — e.g. "Times Square", "SoHo", "Midtown".
+          The query sent to Azure Maps will be "<neighborhood>, <city>, <state>" for precise results.
         
         EXAMPLES:
-        - Input: city="Seattle", state="WA" → Returns coordinates and location details
-        - Input: city="Austin", state="Texas" → Returns coordinates and location details
-        - Input: city="Portland", state="OR" → Returns coordinates and location details
+        - Times Square:  city="New York",  state="NY",    neighborhood="Times Square"
+        - Fenway Park:   city="Boston",    state="MA",    neighborhood="Fenway Park"
+        - SoHo:          city="New York",  state="NY",    neighborhood="SoHo"
+        - Just a city:   city="Seattle",   state="WA"
+        - Just a city:   city="Austin",    state="Texas"
         
         RESPONSE INCLUDES:
         - Latitude and longitude coordinates
@@ -1099,9 +1166,9 @@ class AzureMapsPlugin:
         """
     )
     async def geolocate_city_state(self,
-                                   city: Annotated[str, "City name or 'Neighborhood, City' (e.g., 'Midtown Manhattan, New York', 'Downtown Seattle', 'Austin')"],
+                                   city: Annotated[str, "The city name only — never a landmark or neighborhood (e.g., 'New York', 'Seattle', 'Austin'). Use resolve_landmark first if you only have a landmark name."],
                                    state: Annotated[str, "State name or abbreviation (e.g., 'WA', 'Washington', 'TX', 'Texas')"],
-                                   neighborhood: Annotated[str, "Optional specific neighborhood or district for more precise coordinates (e.g., 'Midtown Manhattan', 'SoHo', 'Capitol Hill')"] = None) -> str:
+                                   neighborhood: Annotated[str, "Optional landmark, neighborhood, or district within the city (e.g., 'Times Square', 'SoHo', 'Midtown Manhattan', 'Capitol Hill'). When provided, the search query becomes '<neighborhood>, <city>, <state>'."] = None) -> str:
         """
         Get geographical coordinates and location details for a city and state.
         

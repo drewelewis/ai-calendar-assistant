@@ -76,7 +76,7 @@ class TelemetryConfig:
             return True
             
         except Exception as e:
-            print(f"❌ Failed to configure telemetry: {e}")
+            print(f"[ERROR] Failed to configure telemetry: {e}")
             return False
     
     def _configure_auto_instrumentation(self):

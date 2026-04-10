@@ -61,10 +61,10 @@ def _safe_import_telemetry():
     try:
         # Check if telemetry is explicitly disabled FIRST
         if TELEMETRY_EXPLICITLY_DISABLED:
-            print("🚫 Telemetry disabled - skipping import")
+            print("[SKIP] Telemetry disabled - skipping import")
             return False
             
-        print(f"🔄 Attempting telemetry import with {TELEMETRY_IMPORT_TIMEOUT}s timeout...")
+        print(f"[*] Attempting telemetry import with {TELEMETRY_IMPORT_TIMEOUT}s timeout...")
         
         # Use ThreadPoolExecutor to import with timeout
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -73,16 +73,16 @@ def _safe_import_telemetry():
                 # Wait for import with timeout
                 return future.result(timeout=TELEMETRY_IMPORT_TIMEOUT)
             except concurrent.futures.TimeoutError:
-                print(f"⏰ Telemetry import timed out after {TELEMETRY_IMPORT_TIMEOUT} seconds")
-                print("🔄 Continuing with fallback implementations")
+                print(f"[TIMEOUT] Telemetry import timed out after {TELEMETRY_IMPORT_TIMEOUT} seconds")
+                print("[*] Continuing with fallback implementations")
                 return False
             except Exception as e:
-                print(f"⚠️  Telemetry import failed: {e}")
-                print("🔄 Using fallback implementations")
+                print(f"[WARN] Telemetry import failed: {e}")
+                print("[*] Using fallback implementations")
                 return False
                 
     except Exception as e:
-        print(f"⚠️  Error during telemetry import process: {e}")
+        print(f"[WARN] Error during telemetry import process: {e}")
         return False
 
 def _import_telemetry_modules():
@@ -91,7 +91,7 @@ def _import_telemetry_modules():
     This runs in a separate thread to enable timeout handling.
     """
     try:
-        print("📦 Importing telemetry modules...")
+        print("[*] Importing telemetry modules...")
         
         from telemetry import (
             trace_async_method,
@@ -135,10 +135,10 @@ def _import_telemetry_modules():
 
 # Attempt telemetry import with timeout protection ONLY if not disabled
 if not TELEMETRY_EXPLICITLY_DISABLED:
-    print("🔄 Initializing telemetry components...")
+    print("[*] Initializing telemetry components...")
     TELEMETRY_AVAILABLE = _safe_import_telemetry()
 else:
-    print("⚡ Skipping telemetry initialization (disabled)")
+    print("[SKIP] Skipping telemetry initialization (disabled)")
     TELEMETRY_AVAILABLE = False
 
 # Production-grade fallback implementations
@@ -1377,10 +1377,10 @@ class GraphOperations:
         
     # Calendar Operations
     # Get calendar events for a user by user ID with optional date range
-    async def get_user_calendar_events_by_user_id(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> List[Event] | None:
-        return await self._get_user_calendar_events_by_user_id_impl(user_id, start_date, end_date)
+    async def get_user_calendar_events_by_user_id(self, user_id: str, start_date: datetime = None, end_date: datetime = None, iana_timezone: str = None) -> List[Event] | None:
+        return await self._get_user_calendar_events_by_user_id_impl(user_id, start_date, end_date, iana_timezone)
     
-    async def _get_user_calendar_events_by_user_id_impl(self, user_id: str, start_date: datetime = None, end_date: datetime = None) -> List[Event] | None:
+    async def _get_user_calendar_events_by_user_id_impl(self, user_id: str, start_date: datetime = None, end_date: datetime = None, iana_timezone: str = None) -> List[Event] | None:
         try:
             # First validate the user's mailbox
             validation_result = await self.validate_user_mailbox(user_id)
@@ -1399,7 +1399,7 @@ class GraphOperations:
                 # calendarView is the correct endpoint for date-range queries — it handles
                 # timezone conversion properly, unlike /events with OData date filters.
                 # Prefer header returns event times in the user's mailbox timezone (NYC = EST).
-                MAILBOX_TIMEZONE = "Eastern Standard Time"
+                MAILBOX_TIMEZONE = iana_timezone or "Eastern Standard Time"
 
                 calendar_view_query_params = CalendarViewRequestBuilder.CalendarViewRequestBuilderGetQueryParameters()
                 calendar_view_query_params.orderby = ["start/dateTime"]
@@ -1504,7 +1504,7 @@ class GraphOperations:
     
     # Create calendar event for a list of attendees and optional attendees
     @trace_async_method("create_calendar_event", include_args=True)
-    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, recurrence: dict = None) -> Event:
+    async def create_calendar_event(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, recurrence: dict = None, iana_timezone: str = None) -> Event:
         try:
             console_info(f"Creating calendar event: {subject} for user {user_id}", "GraphOps")
 
@@ -1540,7 +1540,7 @@ class GraphOperations:
                 # Parse the start time to format it nicely
                 try:
                     start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                    formatted_start = start_dt.strftime("%A, %B %d, %Y at %I:%M %p UTC")
+                    formatted_start = start_dt.strftime("%A, %B %d, %Y at %I:%M %p Eastern")
                 except:
                     formatted_start = start
                 
@@ -1565,10 +1565,11 @@ class GraphOperations:
                 """.strip()
             
             # Create the event object with enhanced body content
+            tz = iana_timezone or "Eastern Standard Time"
             event = Event(
                 subject=subject,
-                start=DateTimeTimeZone(date_time=start, time_zone="UTC"),
-                end=DateTimeTimeZone(date_time=end, time_zone="UTC"),
+                start=DateTimeTimeZone(date_time=start, time_zone=tz),
+                end=DateTimeTimeZone(date_time=end, time_zone=tz),
                 location=Location(display_name=location) if location else None,
                 body=ItemBody(content_type=BodyType.Html, content=enhanced_body),
                 attendees=[]
@@ -1635,6 +1636,51 @@ class GraphOperations:
             traceback.print_exc()
             return None
     
+    # Update (patch) an existing calendar event — used for reschedule, subject change, etc.
+    @trace_async_method("update_calendar_event", include_args=True)
+    async def update_calendar_event(self, user_id: str, event_id: str, start: str = None, end: str = None, subject: str = None, location: str = None, body: str = None, iana_timezone: str = None) -> Event:
+        return await self._update_calendar_event_impl(user_id, event_id, start, end, subject, location, body, iana_timezone)
+
+    async def _update_calendar_event_impl(self, user_id: str, event_id: str, start: str = None, end: str = None, subject: str = None, location: str = None, body: str = None, iana_timezone: str = None) -> Event:
+        try:
+            console_info(f"Updating calendar event {self._format_event_id(event_id)}", "GraphOps")
+            patch = Event()
+            if subject is not None:
+                patch.subject = subject
+            tz = iana_timezone or "Eastern Standard Time"
+            if start is not None:
+                patch.start = DateTimeTimeZone(date_time=start, time_zone=tz)
+            if end is not None:
+                patch.end = DateTimeTimeZone(date_time=end, time_zone=tz)
+            if location is not None:
+                patch.location = Location(display_name=location)
+            if body is not None:
+                patch.body = ItemBody(content_type=BodyType.Html, content=body)
+
+            updated = await self._get_client().users.by_user_id(user_id).calendar.events.by_event_id(event_id).patch(patch)
+            console_info(f"Calendar event updated successfully", "GraphOps")
+            return updated
+        except Exception as e:
+            console_error(f"Failed to update calendar event: {e}", "GraphOps")
+            traceback.print_exc()
+            raise
+
+    # Delete a calendar event by ID
+    @trace_async_method("delete_calendar_event", include_args=True)
+    async def delete_calendar_event(self, user_id: str, event_id: str) -> bool:
+        return await self._delete_calendar_event_impl(user_id, event_id)
+
+    async def _delete_calendar_event_impl(self, user_id: str, event_id: str) -> bool:
+        try:
+            console_info(f"Deleting calendar event {self._format_event_id(event_id)}", "GraphOps")
+            await self._get_client().users.by_user_id(user_id).calendar.events.by_event_id(event_id).delete()
+            console_info(f"Calendar event deleted successfully", "GraphOps")
+            return True
+        except Exception as e:
+            console_error(f"Failed to delete calendar event: {e}", "GraphOps")
+            traceback.print_exc()
+            return False
+
     # Get specific calendar event by event ID
     @trace_async_method("get_calendar_event_by_id", include_args=True)
     async def get_calendar_event_by_id(self, user_id: str, event_id: str) -> Event:
@@ -2048,7 +2094,7 @@ class GraphOperations:
 
     # Enhanced create calendar event with online meeting options
     @trace_async_method("create_calendar_event_with_online_meeting", include_args=True)
-    async def create_calendar_event_with_online_meeting(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_online_meeting: bool = False, meeting_platform: str = None, recurrence: dict = None) -> Event:
+    async def create_calendar_event_with_online_meeting(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_online_meeting: bool = False, meeting_platform: str = None, recurrence: dict = None, iana_timezone: str = None) -> Event:
         """
         Create a calendar event with optional online meeting integration (Zoom or Teams).
         
@@ -2123,10 +2169,11 @@ class GraphOperations:
                     print(f"⚠️ Failed to create {meeting_platform} meeting, proceeding with regular calendar event")
             
             # Create the event object with enhanced content
+            tz = iana_timezone or "Eastern Standard Time"
             event = Event(
                 subject=subject,
-                start=DateTimeTimeZone(date_time=start, time_zone="UTC"),
-                end=DateTimeTimeZone(date_time=end, time_zone="UTC"),
+                start=DateTimeTimeZone(date_time=start, time_zone=tz),
+                end=DateTimeTimeZone(date_time=end, time_zone=tz),
                 location=Location(display_name=enhanced_location) if enhanced_location else None,
                 body=ItemBody(content_type=BodyType.Html, content=enhanced_body) if enhanced_body else None,
                 attendees=[]
@@ -2202,7 +2249,7 @@ class GraphOperations:
 
     # Backward compatibility method for Teams meetings
     @trace_async_method("create_calendar_event_with_teams", include_args=True)
-    async def create_calendar_event_with_teams(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_teams_meeting: bool = False, recurrence: dict = None) -> Event:
+    async def create_calendar_event_with_teams(self, user_id: str, subject: str, start: str, end: str, location: str = None, body: str = None, attendees: List[str] = None, optional_attendees: List[str] = None, create_teams_meeting: bool = False, recurrence: dict = None, iana_timezone: str = None) -> Event:
         """
         Create a calendar event with Teams meeting (backward compatibility wrapper).
         """
@@ -2217,7 +2264,8 @@ class GraphOperations:
             optional_attendees=optional_attendees,
             create_online_meeting=create_teams_meeting,
             meeting_platform='teams',
-            recurrence=recurrence
+            recurrence=recurrence,
+            iana_timezone=iana_timezone
         )
 
     # Get and display conference room events

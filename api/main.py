@@ -1,4 +1,3 @@
-import re
 from urllib import request
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,16 +15,23 @@ from storage.cosmosdb_chat_history_manager import CosmosDBChatHistoryManager
 from telemetry.config import initialize_telemetry, get_telemetry
 from telemetry.decorators import trace_async_method, measure_performance
 import os
+import logging
 
 # Initialize telemetry for FastAPI
 connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
 service_name = os.getenv("TELEMETRY_SERVICE_NAME", "ai-calendar-assistant")
 service_version = os.getenv("TELEMETRY_SERVICE_VERSION", "1.0.0")
 
-telemetry = initialize_telemetry(
-    service_name=service_name,
-    service_version=service_version
-)
+# Wrap telemetry initialization with try-except to handle failures gracefully
+try:
+    telemetry = initialize_telemetry(
+        service_name=service_name,
+        service_version=service_version
+    )
+    logging.info("✅ Telemetry initialized successfully")
+except Exception as e:
+    logging.warning(f"⚠️ Telemetry initialization failed (continuing without telemetry): {e}")
+    telemetry = None
 
 app = FastAPI(
     title="AI Calendar Assistant API",
@@ -93,6 +99,143 @@ async def agent_chat(message: ChatModels.Message):
         **analytics
     }
 
+# Card action handlers for Adaptive Card button submissions
+async def handle_card_action(action: str, data: dict, session_id: str, user_timezone: str, logger, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """
+    Generic handler for card button actions from Teams Adaptive Cards.
+    Routes to specific handlers based on action type.
+    """
+    action_handlers = {
+        "book_anyway": handle_book_anyway,
+        "find_another_time": handle_reschedule,
+        "reschedule": handle_reschedule,
+        "confirm": handle_confirm,
+        "cancel": handle_cancel,
+        "view_profile": handle_view_profile,
+        "edit_meeting": handle_edit_meeting,
+        "schedule_meeting": handle_schedule_meeting,
+    }
+    
+    handler = action_handlers.get(action)
+    if not handler:
+        return ChatModels.ChatResponse(
+            response=f"Unknown action: {action}",
+            session_id=session_id
+        )
+    
+    try:
+        return await handler(action, data, session_id, user_timezone, user_local_timestamp=user_local_timestamp, user_locale=user_locale)
+    except Exception as e:
+        logger.error(f"Error handling card action '{action}': {e}")
+        return ChatModels.ChatResponse(
+            response=f"An error occurred processing your request: {str(e)}",
+            session_id=session_id
+        )
+
+
+async def handle_book_anyway(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """User chose to book meeting despite conflicts"""
+    meeting_subject = data.get("meeting_subject", "")
+    proposed_start = data.get("proposed_start", "")
+    try:
+        orchestrator = MultiAgentOrchestrator(session_id=session_id, user_timezone=user_timezone, user_local_timestamp=user_local_timestamp, user_locale=user_locale)
+        result = await orchestrator.process_message(
+            f"Book this meeting anyway: {meeting_subject} at {proposed_start}"
+        )
+        return ChatModels.ChatResponse(
+            response=result,
+            session_id=session_id
+        )
+    except Exception as e:
+        return ChatModels.ChatResponse(
+            response=f"Failed to book meeting: {str(e)}",
+            session_id=session_id
+        )
+
+
+async def handle_reschedule(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """User wants to find alternative time"""
+    meeting_subject = data.get("meeting_subject", "")
+    try:
+        orchestrator = MultiAgentOrchestrator(session_id=session_id, user_timezone=user_timezone, user_local_timestamp=user_local_timestamp, user_locale=user_locale)
+        result = await orchestrator.process_message(
+            f"Let's find another time for '{meeting_subject}' that works for everyone. What times are available?"
+        )
+        return ChatModels.ChatResponse(
+            response=result,
+            session_id=session_id
+        )
+    except Exception as e:
+        return ChatModels.ChatResponse(
+            response=f"Failed to reschedule: {str(e)}",
+            session_id=session_id
+        )
+
+
+async def handle_confirm(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """Generic confirmation from card"""
+    return ChatModels.ChatResponse(
+        response="✅ Confirmed! Proceeding with your request.",
+        session_id=session_id
+    )
+
+
+async def handle_cancel(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """User cancelled interaction"""
+    return ChatModels.ChatResponse(
+        response="❌ Cancelled. What else can I help you with?",
+        session_id=session_id
+    )
+
+
+async def handle_view_profile(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """View user profile"""
+    return ChatModels.ChatResponse(
+        response="Opening full profile...",
+        session_id=session_id
+    )
+
+
+async def handle_edit_meeting(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """Edit meeting"""
+    meeting_id = data.get("meeting_id", "")
+    meeting_subject = data.get("meeting_subject", "")
+    try:
+        orchestrator = MultiAgentOrchestrator(session_id=session_id, user_timezone=user_timezone, user_local_timestamp=user_local_timestamp, user_locale=user_locale)
+        result = await orchestrator.process_message(
+            f"I'd like to edit the meeting '{meeting_subject}' (event ID: {meeting_id})"
+        )
+        return ChatModels.ChatResponse(
+            response=result,
+            session_id=session_id
+        )
+    except Exception as e:
+        return ChatModels.ChatResponse(
+            response=f"Failed to open meeting editor: {str(e)}",
+            session_id=session_id
+        )
+
+
+async def handle_schedule_meeting(action: str, data: dict, session_id: str, user_timezone: str, user_local_timestamp: str = None, user_locale: str = None) -> ChatModels.ChatResponse:
+    """Schedule meeting with attendee"""
+    attendee = data.get("attendee", "")
+    attendee_name = data.get("attendee_name", "")
+    try:
+        orchestrator = MultiAgentOrchestrator(session_id=session_id, user_timezone=user_timezone, user_local_timestamp=user_local_timestamp, user_locale=user_locale)
+        result = await orchestrator.process_message(
+            f"Let's schedule a meeting with {attendee_name} ({attendee}). When would work for you?"
+        )
+        return ChatModels.ChatResponse(
+            response=result,
+            session_id=session_id
+        )
+    except Exception as e:
+        return ChatModels.ChatResponse(
+            response=f"Failed to schedule meeting: {str(e)}",
+            session_id=session_id
+        )
+
+
 @app.post("/multi_agent_chat")
 @trace_async_method(operation_name="api.multi_agent_chat", include_args=True)
 @measure_performance("api_multi_agent_chat")
@@ -110,31 +253,67 @@ async def multi_agent_chat(message: ChatModels.Message):
                 "message": "Please provide a valid session_id in your request"
             }
         
+        # Check if this is a card action submission
+        if message.card_action:
+            action_response = await handle_card_action(
+                message.card_action.action,
+                message.card_action.data or {},
+                message.session_id,
+                message.user_timezone,
+                logger,
+                user_local_timestamp=message.user_local_timestamp,
+                user_locale=message.user_locale
+            )
+            return action_response
+        
         # Create multi-agent orchestrator with required session_id
-        orchestrator = MultiAgentOrchestrator(session_id=message.session_id)
+        orchestrator = MultiAgentOrchestrator(session_id=message.session_id, user_timezone=message.user_timezone, user_local_timestamp=message.user_local_timestamp, user_locale=message.user_locale)
         
         # Process message through multi-agent system
-        result = await orchestrator.process_message(message.message)
+        result = await orchestrator.process_message_with_context(message.message)
+        
+        response_text = result.get("message", "")
+        cards = result.get("cards", [])  # Array of 0, 1, or more cards
         
         # For multi-agent, we'll estimate token usage based on response length
         # In a production system, you'd want to modify the orchestrator to return token usage
         estimated_tokens = TokenUsage(
             prompt_tokens=len(message.message.split()) * 1.3,  # Rough estimate
-            completion_tokens=len(result.split()) * 1.3,  # Rough estimate
-            total_tokens=(len(message.message.split()) + len(result.split())) * 1.3
+            completion_tokens=len(response_text.split()) * 1.3,  # Rough estimate
+            total_tokens=(len(message.message.split()) + len(response_text.split())) * 1.3
         )
         
         # Calculate costs and analytics
         cost_data = llm_analytics.calculate_cost(estimated_tokens)
         analytics = llm_analytics.format_analytics_display(cost_data, message.session_id, "multi_agent")
         
-        return {
-            "response": result,
+        response_data = {
+            "response": response_text,
             "session_id": message.session_id,
             "agent_type": "multi_agent",
             "note": "Token usage estimated for multi-agent system",
             **analytics
         }
+        
+        # Add cards if any were generated
+        if cards:
+            print(f"[CARD] 📤 Adding {len(cards)} card(s) to API response (session: {message.session_id})")
+            response_data["cards"] = cards
+            try:
+                cosmos_manager = await get_cosmos_manager()
+                for card in cards:
+                    attached = await cosmos_manager.attach_card_to_latest_assistant(message.session_id, card)
+                    if attached:
+                        print(f"[CARD] 💾 Card persisted to Cosmos DB")
+                    else:
+                        print(f"[CARD] ⚠️  Card not persisted (failed to update history)")
+            except Exception as e:
+                print(f"[CARD] ⚠️  Error persisting cards: {e}")
+                logger.warning(f"Failed to attach cards to chat history: {e}")
+        else:
+            print(f"[CARD] ℹ️  No cards generated for this response")
+        
+        return response_data
         
     except ValueError as ve:
         # Handle session_id validation errors
@@ -355,6 +534,12 @@ async def get_messages(session_id: str = None):
             return {
                 "session_id": session_id,
                 "timestamp": doc.get("timestamp"),
+                "app_context": {
+                    "container": os.getenv("CONTAINER_APP_NAME", "unknown"),
+                    "revision": os.getenv("CONTAINER_APP_REVISION", "unknown"),
+                    "version": os.getenv("APP_VERSION", "unknown"),
+                },
+                "user_context": doc.get("user_context"),
                 "message_count": len(messages),
                 "messages": messages
             }

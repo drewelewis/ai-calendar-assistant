@@ -83,6 +83,14 @@ FOLDERS:
 - drafts      → unsent drafts
 - deleteditems→ deleted mail
 
+RESPONSE FORMAT — MANDATORY:
+Every response MUST be valid JSON:
+  {{"message": "...", "cards": []}}
+This agent does not produce cards — always use "cards": [].
+Example: {{"message": "You have 3 unread emails from today.", "cards": []}}
+
+NEVER output plain text — always the JSON envelope.
+
 Session ID: {session_id}
 """.strip()
 

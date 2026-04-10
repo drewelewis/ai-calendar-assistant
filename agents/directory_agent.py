@@ -3,6 +3,7 @@ from semantic_kernel import Kernel
 from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.functions import KernelArguments
 
+from plugins.card_plugin import CardPlugin
 from plugins.graph_plugin import GraphPlugin
 
 
@@ -19,6 +20,7 @@ def create_directory_agent(
     kernel = Kernel()
     kernel.add_service(shared_service)
     kernel.add_plugin(GraphPlugin(debug=False, session_id=session_id), plugin_name="graph")
+    kernel.add_plugin(CardPlugin(), plugin_name="cards")
 
     instructions = f"""
 You are the Directory Agent, specialized in organizational data and people search.
@@ -63,6 +65,29 @@ RESPONSE STYLE:
   the available list (e.g., "Engineering" → "Application Development" or
   "Information Technology") and offer to search in that department instead.
   Do NOT just dump the full department list — pick the 1-2 most relevant matches.
+
+══════════════════════════════════════════════════
+CARD RESPONSES — WHEN TO RENDER A PROFILE CARD
+══════════════════════════════════════════════════
+When you retrieve a SINGLE user's profile (via get_user_by_id, get_user_by_user_id, the
+top result from user_search, or get_user_manager / get_direct_reports for one person), you MUST:
+  1. Call cards-build_profile_card with user_json as a JSON string:
+       {{"displayName": "...", "jobTitle": "...", "department": "...",
+         "mail": "...", "mobilePhone": "...", "officeLocation": ""}}
+     Include all fields available in the user object.
+  2. In your JSON response: set "cards" to the card array returned by the tool,
+     and set "message" to "" (empty — the card IS the response for a single profile lookup).
+
+For org chart / multi-user / department list results → use "message" with text, "cards": [].
+
+RESPONSE FORMAT — MANDATORY:
+Every response MUST be valid JSON:
+  {{"message": "...", "cards": []}}
+
+Profile card turns  : {{"message": "", "cards": [<AdaptiveCard from build_profile_card>]}}
+All other turns     : {{"message": "Here are the results...", "cards": []}}
+
+NEVER output plain text — always the JSON envelope.
 
 Session ID: {session_id}
 """.strip()

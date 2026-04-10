@@ -140,14 +140,14 @@ def main():
     """Example usage and testing."""
     try:
         client_instance = OpenAIClient()
-        print("✅ Azure OpenAI client initialized successfully.")
-        print(f"📋 Model: {client_instance.model_deployment_name}")                    
-        print(f"🤖 Is O1 model: {client_instance._is_o1_model(client_instance.model_deployment_name)}")
-        print(f"🔧 Is GPT-4.1 model: {client_instance._is_gpt41_model(client_instance.model_deployment_name)}")
+        print("[OK] Azure OpenAI client initialized successfully.")
+        print(f"[INFO] Model: {client_instance.model_deployment_name}")                    
+        print(f"[INFO] Is O1 model: {client_instance._is_o1_model(client_instance.model_deployment_name)}")
+        print(f"[INFO] Is GPT-4.1 model: {client_instance._is_gpt41_model(client_instance.model_deployment_name)}")
         
          # Only print temperature if it's not an o1 model
         if not client_instance._is_o1_model(client_instance.model_deployment_name):
-            print(f"🌡️  Temperature: {client_instance.temperature}")
+            print(f"[TEMP] Temperature: {client_instance.temperature}")
         
         # Example completion request
         messages = [
@@ -155,13 +155,13 @@ def main():
             {"role": "user", "content": "Hello, how can you assist me today?"}
         ]
         
-        print("\n🚀 Testing completion...")
+        print("\n[*] Testing completion...")
         response = client_instance.completion(messages, max_tokens=100)
-        print(f"📝 Response: {response.choices[0].message.content}")
-        print(f"📊 Tokens used: {response.usage.total_tokens}")
+        print(f"[RESPONSE] {response.choices[0].message.content}")
+        print(f"[TOKENS] Tokens used: {response.usage.total_tokens}")
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] {e}")
 
 
 if __name__ == "__main__":

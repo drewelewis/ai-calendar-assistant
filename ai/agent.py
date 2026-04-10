@@ -134,7 +134,7 @@ class Agent:
                 
                 # Provide specific guidance based on error type
                 if "ManagedIdentityCredential" in str(e) or "No managed identity endpoint found" in str(e):
-                    print("🔐 MANAGED IDENTITY ISSUE DETECTED:")
+                    print("[SECURITY] MANAGED IDENTITY ISSUE DETECTED:")
                     print("   This appears to be a production managed identity configuration problem.")
                     print("   📖 See '_production_managed_identity_setup.md' for detailed setup instructions.")
                     print("")

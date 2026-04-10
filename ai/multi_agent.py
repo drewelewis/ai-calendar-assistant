@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft. All rights reserved.
 import os
 import asyncio
+import copy
 import json
 import logging
 from typing import Dict, List, Optional, Any
@@ -79,12 +80,16 @@ class MultiAgentOrchestrator:
     - RiskAgent     : Client risk analysis via Risk plugin
     """
 
-    def __init__(self, session_id: str = None):
+    def __init__(self, session_id: str = None, user_timezone: str = None, user_local_timestamp: str = None, user_locale: str = None):
         if not session_id:
             raise ValueError("session_id is required for MultiAgentOrchestrator")
+        if not user_timezone:
+            raise ValueError("user_timezone is required for MultiAgentOrchestrator")
 
         self.session_id = session_id
-
+        self.user_timezone = user_timezone
+        self.user_local_timestamp = user_local_timestamp
+        self.user_locale = user_locale
         self._initialize_telemetry()
         self._load_environment()
         self._initialize_cosmos()
@@ -186,6 +191,33 @@ class MultiAgentOrchestrator:
                     self.settings.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
                 if hasattr(self.settings, "top_p"):
                     self.settings.top_p = float(os.getenv("OPENAI_TOP_P", "0.9"))
+            # All agents respond with a structured JSON envelope — enables reliable card extraction.
+            # Using json_schema (Structured Outputs) rather than json_object gives constrained
+            # decoding and guarantees the {message, cards} shape without hallucinated keys.
+            # strict=False because Adaptive Card objects are deeply nested and variable.
+            if hasattr(self.settings, "response_format"):
+                self.settings.response_format = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "agent_response",
+                        "strict": False,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "description": "Natural language response to display to the user. Empty string when a card is the entire response."
+                                },
+                                "cards": {
+                                    "type": "array",
+                                    "description": "Zero or more Adaptive Card objects to render in Microsoft Teams.",
+                                    "items": {"type": "object"}
+                                }
+                            },
+                            "required": ["message", "cards"]
+                        }
+                    }
+                }
         except (ValueError, TypeError) as e:
             self.logger.warning(f"Could not set OpenAI params: {e}")
 
@@ -196,8 +228,8 @@ class MultiAgentOrchestrator:
         shared_service = self.kernel.get_service(self.service_id)
 
         agents: Dict[str, ChatCompletionAgent] = {
-            "proxy":     create_proxy_agent(shared_service, self.service_id, self.session_id, self.settings),
-            "calendar":  create_calendar_agent(shared_service, self.service_id, self.session_id, self.settings),
+            "proxy":     create_proxy_agent(shared_service, self.service_id, self.session_id, self.settings, cosmos_manager=self.cosmos_manager),
+            "calendar":  create_calendar_agent(shared_service, self.service_id, self.session_id, self.settings, user_timezone=self.user_timezone, user_local_timestamp=self.user_local_timestamp, user_locale=self.user_locale),
             "directory": create_directory_agent(shared_service, self.service_id, self.session_id, self.settings),
             "email":     create_email_agent(shared_service, self.service_id, self.session_id, self.settings),
             "location":  create_location_agent(shared_service, self.service_id, self.session_id, self.settings),
@@ -286,12 +318,37 @@ class MultiAgentOrchestrator:
                 console_debug(f"LLM router selected: {agent_name}", module="Router")
                 return selected
 
-            self.logger.warning(f"Router returned unknown agent '{agent_name}', using proxy")
-            return self.agents["proxy"]
+            raise ValueError(f"Router returned unknown agent name: '{agent_name}'")
 
+        except ValueError:
+            raise
         except Exception as e:
-            self.logger.warning(f"LLM routing failed ({e}), defaulting to proxy")
-            return self.agents["proxy"]
+            raise RuntimeError(f"LLM routing failed: {e}") from e
+
+    _CLEAR_TRIGGERS = frozenset({
+        "new", "new chat", "new session", "start over", "fresh start",
+        "begin again", "restart", "clear chat", "clear history",
+        "clear everything", "reset", "wipe history", "forget everything",
+    })
+
+    def _is_clear_trigger(self, message: str) -> bool:
+        return message.strip().lower() in self._CLEAR_TRIGGERS
+
+    def _is_card_trigger(self, message: str) -> bool:
+        if not message:
+            return False
+        lower_message = message.lower()
+        return any(
+            phrase in lower_message
+            for phrase in ("show me your cards", "show cards", "demo", "show capabilities")
+        )
+
+    def _build_proxy_card_arguments(self) -> KernelArguments:
+        # response_format=json_object is already set globally; only override temperature
+        proxy_settings = copy.deepcopy(self.settings)
+        if hasattr(proxy_settings, "temperature"):
+            proxy_settings.temperature = 0.0
+        return KernelArguments(settings=proxy_settings)
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -320,6 +377,13 @@ class MultiAgentOrchestrator:
         except Exception:
             pass
 
+        # --- Clear trigger: wipe Cosmos BEFORE hydration so the next turn starts fresh ---
+        if self._is_clear_trigger(message):
+            if self.cosmos_manager:
+                await self.cosmos_manager.clear_chat_history(session_id=self.session_id)
+                self.logger.info(f"Chat history cleared for session {self.session_id}")
+            return "Chat history cleared! Starting fresh — how can I help you today?"
+
         # --- Hydrate / create thread ---
         with TelemetryContext(operation="thread_creation", session_id=self.session_id):
             if self.cosmos_manager:
@@ -331,12 +395,9 @@ class MultiAgentOrchestrator:
                 thread = ChatHistoryAgentThread()
                 self.logger.debug("New empty thread created")
 
-        try:
-            thread = await self.thread_utils.ensure_system_and_instruction_messages(
-                thread, self.session_id, prompts, self.logger
-            )
-        except Exception as e:
-            self.logger.warning(f"ensure_system_and_instruction_messages: {e}")
+        thread = await self.thread_utils.ensure_system_and_instruction_messages(
+            thread, self.session_id, prompts, self.logger
+        )
 
         # --- LLM routing (with CosmosDB context for ambiguous follow-ups) ---
         recent_context = self._extract_recent_context(thread)
@@ -351,9 +412,14 @@ class MultiAgentOrchestrator:
             message_length=len(message),
         ):
             try:
+                response_args = None
+                if selected_agent.name == "ProxyAgent" and self._is_card_trigger(message):
+                    response_args = self._build_proxy_card_arguments()
+
                 response = await selected_agent.get_response(
                     messages=message,
                     thread=thread,
+                    arguments=response_args,
                 )
 
                 # Unwrap the response
@@ -384,17 +450,163 @@ class MultiAgentOrchestrator:
                 )
 
         if not response_content:
-            response_content = "I wasn't able to generate a response. Please try again."
+            raise RuntimeError(f"Agent {selected_agent.name} returned empty response")
+
+        # All agents return JSON envelope — extract "message" for plain-text callers
+        _parsed = json.loads(response_content)
+        if isinstance(_parsed, dict) and "message" in _parsed:
+            response_content = _parsed["message"]
 
         # --- Persist chat history ---
         if self.cosmos_manager:
             try:
                 with TelemetryContext(operation="save_chat_history", session_id=self.session_id):
-                    await self.cosmos_manager.save_chat_history(thread, self.session_id)
+                    await self.cosmos_manager.save_chat_history(
+                        thread, self.session_id,
+                        user_timezone=self.user_timezone,
+                        user_local_timestamp=self.user_local_timestamp,
+                        user_locale=self.user_locale,
+                    )
             except Exception as e:
                 self.logger.error(f"Failed to save chat history: {e}")
 
         return response_content
+
+    async def process_message_with_context(self, message: str) -> Dict[str, Any]:
+        """
+        Route message to appropriate agent and return BOTH response text and structured context.
+        
+        Returns:
+        {
+            "response": "...",  # Natural language response text
+            "meeting_data": {...}  # Structured data if a calendar event was created
+        }
+        """
+        self.logger.info(f"process_message_with_context – session: {self.session_id}")
+
+        try:
+            if "chat_requests_total" in self.metrics:
+                self.metrics["chat_requests_total"].add(
+                    1, {"session_id": self.session_id, "agent_type": "multi_agent"}
+                )
+        except Exception:
+            pass
+
+        # --- Clear trigger: wipe Cosmos BEFORE hydration so the next turn starts fresh ---
+        if self._is_clear_trigger(message):
+            if self.cosmos_manager:
+                await self.cosmos_manager.clear_chat_history(session_id=self.session_id)
+                self.logger.info(f"Chat history cleared for session {self.session_id}")
+            return {"message": "Chat history cleared! Starting fresh — how can I help you today?", "cards": []}
+
+        # --- Hydrate / create thread ---
+        with TelemetryContext(operation="thread_creation", session_id=self.session_id):
+            if self.cosmos_manager:
+                thread = await self.cosmos_manager.create_hydrated_thread(
+                    self.kernel, self.session_id
+                )
+                self.logger.debug("Thread hydrated from CosmosDB")
+            else:
+                thread = ChatHistoryAgentThread()
+                self.logger.debug("New empty thread created")
+
+        thread = await self.thread_utils.ensure_system_and_instruction_messages(
+            thread, self.session_id, prompts, self.logger
+        )
+
+        # --- LLM routing ---
+        recent_context = self._extract_recent_context(thread)
+        with TelemetryContext(operation="llm_routing", message_length=len(message)):
+            selected_agent = await self._route_message(message, recent_context)
+
+        # --- Dispatch to selected agent ---
+        response_content = ""
+        meeting_data = None
+        
+        with TelemetryContext(
+            operation="agent_response",
+            agent_name=selected_agent.name,
+            message_length=len(message),
+        ):
+            try:
+                response_args = None
+                is_card_trigger = selected_agent.name == "ProxyAgent" and self._is_card_trigger(message)
+                if is_card_trigger:
+                    self.logger.info(f"[CARD TRIGGER] Detected: {message[:50]}...")
+                    response_args = self._build_proxy_card_arguments()
+                    self.logger.info(f"[CARD TRIGGER] Applied JSON format + temperature=0")
+                else:
+                    self.logger.debug(f"[CARD TRIGGER] No trigger: agent={selected_agent.name}, msg={message[:50]}")
+
+                response = await selected_agent.get_response(
+                    messages=message,
+                    thread=thread,
+                    arguments=response_args,
+                )
+
+                # Unwrap the response
+                if hasattr(response, "value"):
+                    response_content = response.value
+                elif hasattr(response, "content"):
+                    response_content = response.content
+                else:
+                    response_content = str(response)
+
+                if hasattr(response_content, "content"):
+                    response_content = response_content.content
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+
+                if hasattr(response, "thread"):
+                    thread = response.thread
+
+                # Extract meeting data from thread if calendar event was created
+                meeting_data = None  # Placeholder for potential meeting data extraction
+                # TODO: Implement meeting data extraction from thread if needed
+
+                self.logger.info(
+                    f"{selected_agent.name} responded ({len(response_content)} chars)"
+                )
+                if is_card_trigger:
+                    self.logger.info(f"[CARD RESPONSE] First 150 chars: {response_content[:150]}")
+
+            except Exception as e:
+                self.logger.error(f"Agent {selected_agent.name} error: {e}", exc_info=True)
+                response_content = (
+                    "I'm having trouble processing your request right now. "
+                    "Please try again or rephrase your question."
+                )
+
+        if not response_content:
+            raise RuntimeError(f"Agent {selected_agent.name} returned empty response")
+
+        # --- Extract structured card response (all agents return JSON) ---
+        import json
+        self.logger.info(f"[CARD PARSE] Parsing {selected_agent.name} response ({len(response_content)} chars)")
+        parsed = json.loads(response_content)
+        if not isinstance(parsed, dict) or "message" not in parsed:
+            raise ValueError(f"Agent {selected_agent.name} returned invalid JSON envelope: {response_content[:200]}")
+        cards = parsed.get("cards", [])
+        response_content = parsed["message"]
+        self.logger.info(f"[CARD PARSE] Extracted message ({len(response_content)} chars) and {len(cards)} card(s) from {selected_agent.name}")
+
+        # --- Persist chat history ---
+        if self.cosmos_manager:
+            try:
+                with TelemetryContext(operation="save_chat_history", session_id=self.session_id):
+                    await self.cosmos_manager.save_chat_history(
+                        thread, self.session_id,
+                        user_timezone=self.user_timezone,
+                        user_local_timestamp=self.user_local_timestamp,
+                        user_locale=self.user_locale,
+                    )
+            except Exception as e:
+                self.logger.error(f"Failed to save chat history: {e}")
+
+        return {
+            "message": response_content,
+            "cards": cards  # Array supports 0, 1, or multiple cards per response
+        }
 
     # ------------------------------------------------------------------
     # Utility methods

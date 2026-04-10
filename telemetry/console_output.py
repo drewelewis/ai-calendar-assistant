@@ -143,7 +143,7 @@ class TelemetryConsole:
             'cosmosdb_op': '🌐',
             'token_usage': '📊',
             'chat_request': '💬',
-            'error': '❌',
+            'error': '[ERR]',
             'warning': '⚠️',
             'success': '✅',
             'span_start': '🔵',

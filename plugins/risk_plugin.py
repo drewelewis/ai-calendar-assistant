@@ -9,13 +9,14 @@ from semantic_kernel.functions import kernel_function
 # Import telemetry components first
 from telemetry.decorators import TelemetryContext
 from telemetry.console_output import console_info, console_debug, console_telemetry_event, console_error, console_warning
+from utils.tool_call_tracker import ToolCallTracker
 
 # Try to import the real RiskOperations, fallback to mock if it fails
 try:
     from operations.risk_operations import RiskOperations
     console_info("✓ Using Risk Management Operations", module="RiskPlugin")
 except Exception as e:
-    console_error(f"⚠ Could not import RiskOperations: {e}", module="RiskPlugin")
+    console_error(f"[WARN] Could not import RiskOperations: {e}", module="RiskPlugin")
     raise
 
 try:
@@ -46,6 +47,12 @@ class RiskPlugin:
 
     # Helper method to log function calls if debug is enabled
     def _log_function_call(self, function_name, **kwargs):
+        ToolCallTracker.add_call(
+            session_id=self.session_id,
+            function_name=function_name,
+            plugin_name="risk",
+            arguments=kwargs,
+        )
         if self.debug:
             params_str = ", ".join([f"{k}={repr(v)}" for k, v in kwargs.items()])
             session_info = f"[session: {self.session_id}] " if self.session_id else ""

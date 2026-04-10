@@ -5,6 +5,7 @@ import uuid
 from identity.azure_credentials import AzureCredentials
 from azure.cosmos import CosmosClient, PartitionKey
 from azure.core.exceptions import ClientAuthenticationError
+from utils.tool_call_tracker import ToolCallTracker
 
 
 class CosmosDBChatHistoryManager:
@@ -30,7 +31,7 @@ class CosmosDBChatHistoryManager:
             try:
                 logger.info("🔑 Attempting Azure Identity authentication for CosmosDB...")
                 logger.info(f"🌐 Connecting to CosmosDB URL: {endpoint}")
-                print(f"🌐 Connecting to CosmosDB URL: {endpoint}")  # Also print to console
+                print(f"[COSMOS] Connecting to CosmosDB URL: {endpoint}")  # Also print to console
                 
                 credential = AzureCredentials.get_credential()
                 self.client = CosmosClient(endpoint, credential=credential)
@@ -46,7 +47,7 @@ class CosmosDBChatHistoryManager:
                     
             except Exception as e:
                 logger.warning(f"⚠ Azure Identity authentication failed: {e}")
-                print(f"⚠ Azure Identity failed for URL: {endpoint}")  # Also print to console
+                print(f"[WARN] Azure Identity failed for URL: {endpoint}")  # Also print to console
                 
                 # Check if this is a managed identity issue in production
                 if "ManagedIdentityCredential" in str(e) or "No managed identity endpoint found" in str(e):
@@ -67,7 +68,7 @@ class CosmosDBChatHistoryManager:
                         try:
                             logger.info("🔄 Falling back to connection key authentication...")
                             logger.info(f"🌐 Retry connecting to CosmosDB URL: {endpoint}")
-                            print(f"🔄 Retrying with connection key for URL: {endpoint}")  # Also print to console
+                            print(f"[RETRY] Retrying with connection key for URL: {endpoint}")  # Also print to console
                             
                             self.client = CosmosClient(endpoint, cosmos_key)
                             logger.info("✅ Connected to CosmosDB using connection key")
@@ -78,7 +79,7 @@ class CosmosDBChatHistoryManager:
                             
                         except Exception as key_error:
                             logger.error(f"❌ Connection key authentication also failed: {key_error}")
-                            print(f"❌ Connection key also failed for URL: {endpoint}")  # Also print to console
+                            print(f"[ERROR] Connection key also failed for URL: {endpoint}")  # Also print to console
                             raise ClientAuthenticationError(
                                 f"Failed to connect with both Azure Identity and connection key. "
                                 f"Azure Identity error: {e}. Connection key error: {key_error}"
@@ -105,7 +106,7 @@ class CosmosDBChatHistoryManager:
         else:
             # Use provided credential
             logger.info(f"🌐 Connecting to CosmosDB with provided credential: {endpoint}")
-            print(f"🌐 Connecting to CosmosDB with provided credential: {endpoint}")  # Also print to console
+            print(f"[COSMOS] Connecting to CosmosDB with provided credential: {endpoint}")  # Also print to console
             self.client = CosmosClient(endpoint, credential=credential)
             logger.info("✅ Connected to CosmosDB using provided credential")
         
@@ -122,7 +123,48 @@ class CosmosDBChatHistoryManager:
             logger.error(f"❌ Failed to setup CosmosDB database/container: {setup_error}")
             raise
     
-    async def save_chat_history(self, thread, session_id=None):
+    def _extract_tool_calls(self, message):
+        """Extract tool/function call metadata from a ChatMessageContent message."""
+        tool_calls = []
+
+        # Check if message has items attribute (Semantic Kernel stores function calls in items)
+        if hasattr(message, 'items') and message.items:
+            for item in message.items:
+                # Check for FunctionCallContent
+                if hasattr(item, '__class__') and 'FunctionCallContent' in item.__class__.__name__:
+                    tool_call_data = {
+                        "type": "function_call",
+                        "function_name": getattr(item, 'name', None) or getattr(item, 'function_name', None),
+                        "plugin_name": getattr(item, 'plugin_name', None),
+                        "id": getattr(item, 'id', None)
+                    }
+                    # Try to get arguments
+                    if hasattr(item, 'arguments'):
+                        try:
+                            import json
+                            args = item.arguments
+                            if isinstance(args, str):
+                                tool_call_data["arguments"] = json.loads(args) if args else {}
+                            else:
+                                tool_call_data["arguments"] = args if args else {}
+                        except:
+                            tool_call_data["arguments"] = str(item.arguments) if hasattr(item, 'arguments') else {}
+                    tool_calls.append(tool_call_data)
+
+                # Check for FunctionResultContent
+                elif hasattr(item, '__class__') and 'FunctionResultContent' in item.__class__.__name__:
+                    tool_result_data = {
+                        "type": "function_result",
+                        "function_name": getattr(item, 'name', None) or getattr(item, 'function_name', None),
+                        "plugin_name": getattr(item, 'plugin_name', None),
+                        "id": getattr(item, 'id', None),
+                        "result": str(getattr(item, 'result', None))[:500]  # Limit result size
+                    }
+                    tool_calls.append(tool_result_data)
+
+        return tool_calls if tool_calls else None
+    
+    async def save_chat_history(self, thread, session_id=None, user_timezone=None, user_local_timestamp=None, user_locale=None):
         """Save chat history from a thread to Cosmos DB."""
         if not thread:
             return
@@ -174,16 +216,24 @@ class CosmosDBChatHistoryManager:
                     role = "assistant"
                 elif message.role.value == "system":
                     role = "system"
-            
+                else:
+                    # Skip tool/function result messages — they are transient artifacts
+                    # of SK auto-invoke within a single turn and must not be persisted.
+                    # If saved (with stale role from previous iteration) they appear as
+                    # spurious "assistant" messages in the next turn's hydrated thread,
+                    # which causes the LLM to re-call the same tool unnecessarily.
+                    continue
+
                 # Enhanced content with function call details for CosmosDB storage
-                # enhanced_content = self._create_enhanced_message_content(message)
                 if hasattr(message, 'content'):
                     if message.content != "":
-                        messages.append({
+                        message_data = {
                             "role": role,
                             "content": message.content,
                             "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
-                        })
+                        }
+                        
+                        messages.append(message_data)
 
         except Exception as e:
             print(f"Warning: Could not extract messages from thread: {e}")
@@ -194,8 +244,28 @@ class CosmosDBChatHistoryManager:
             "id": str(uuid.uuid4()),
             "sessionId": session_id,
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "user_context": {
+                "user_timezone": user_timezone,
+                "user_local_timestamp": user_local_timestamp,
+                "user_locale": user_locale,
+            },
             "messages": messages
         }
+
+        # Attach tool calls collected during this request to the latest assistant message
+        try:
+            tracked_tool_calls = ToolCallTracker.consume(session_id)
+            if tracked_tool_calls:
+                attached = False
+                for msg in reversed(messages):
+                    if msg.get("role") == "assistant":
+                        msg["tool_calls"] = tracked_tool_calls
+                        attached = True
+                        break
+                if not attached:
+                    chat_history_document["tool_calls"] = tracked_tool_calls
+        except Exception as e:
+            print(f"Warning: Could not attach tool call metadata: {e}")
         
         # Save to Cosmos DB
         try:
@@ -234,6 +304,47 @@ class CosmosDBChatHistoryManager:
         except Exception as e:
             print(f"Error retrieving session document from CosmosDB: {e}")
             return None
+
+    async def attach_card_to_latest_assistant(self, session_id, card):
+        """Attach an Adaptive Card payload to the latest assistant message."""
+        if not card:
+            print(f"[COSMOS] [WARN] attach_card: no card provided")
+            return False
+
+        doc = await self.get_session_document(session_id)
+        if not doc:
+            print(f"[COSMOS] [WARN] attach_card: no session document found for {session_id}")
+            return False
+
+        messages = doc.get("messages", [])
+        if not messages:
+            print(f"[COSMOS] [WARN] attach_card: no messages in session document")
+            return False
+
+        attached = False
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant":
+                print(f"[COSMOS] [*] Attaching card to latest assistant message")
+                msg["card"] = card
+                attached = True
+                break
+
+        if not attached:
+            print(f"[COSMOS] [WARN] attach_card: no assistant message found to attach to")
+            return False
+
+        try:
+            self.container.replace_item(item=doc["id"], body=doc, partition_key=session_id)
+            print(f"[COSMOS] [OK] Card successfully persisted to document {doc['id']}")
+        except TypeError:
+            # Fallback for SDK signatures that do not accept partition_key
+            self.container.replace_item(item=doc["id"], body=doc)
+            print(f"[COSMOS] [OK] Card persisted (using fallback SDK method)")
+        except Exception as e:
+            print(f"[COSMOS] [ERROR] Error updating session document with card: {e}")
+            return False
+
+        return True
     
     async def load_chat_history(self, session_id):
         """Load chat history from Cosmos DB and return the raw messages."""

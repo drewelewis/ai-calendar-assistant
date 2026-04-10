@@ -18,7 +18,9 @@ sniffio==1.3.1
 
 # OpenAI and AI Libraries
 openai==1.95.1
-semantic-kernel==1.34.0
+semantic-kernel==1.34.0  # Keep for now - plugins still use it
+# agent-framework>=1.0.0rc1  # Microsoft Agent Framework (future migration)
+# azure-ai-agents>=1.0.0b1  # Azure AI Agents (future migration)
 mcp>=1.6.0
 
 # Azure SDK and Authentication
